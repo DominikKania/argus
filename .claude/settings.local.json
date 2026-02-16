@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(gh auth login:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:claude.ai)",
+      "Bash(python argus.py:*)",
+      "Bash(python -m venv:*)",
+      "Bash(venv/Scripts/pip install pymongo)",
+      "Bash(venv/Scripts/pip install:*)",
+      "Bash(venv/Scripts/pip-compile requirements.in)",
+      "Bash(git add:*)"
+    ]
+  }
+}
