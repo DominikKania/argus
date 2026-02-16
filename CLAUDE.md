@@ -17,6 +17,10 @@ Signalsystem: 4 Indikatoren (Trend, Volatilität, Makro, Sentiment) → Gesamtbe
 
 Vollständiges Analyse-Schema siehe `argus-claude-code-prompt.md`, Beispiel siehe `example_analysis.json`.
 
+## Regeln
+
+- **Encoding:** Alle Dateien IMMER als UTF-8 speichern. Besonders bei Prompt-Dateien (`.md`) mit deutschen Umlauten (ä, ö, ü, ß) und Sonderzeichen (€, →, ↔) auf korrekte UTF-8-Kodierung achten.
+
 ## Commands
 
 - `/project:ampel` — Vollständige Ampel-Analyse durchführen (Daten holen → analysieren → speichern)
