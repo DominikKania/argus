@@ -13,7 +13,11 @@
       "Bash(venv/Scripts/pip install pymongo)",
       "Bash(venv/Scripts/pip install:*)",
       "Bash(venv/Scripts/pip-compile requirements.in)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "WebSearch",
+      "WebFetch"
     ]
   }
 }
