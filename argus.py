@@ -2,10 +2,17 @@
 """Argus — Investment Knowledge Base CLI"""
 
 import argparse
+import io
 import json
 import os
 import sys
 from datetime import datetime
+
+# Force UTF-8 output on Windows
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+if sys.stderr.encoding != "utf-8":
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 from bson import ObjectId
 from pymongo import MongoClient, ASCENDING
 
@@ -284,6 +291,37 @@ def cmd_resolve(args):
     print(f"  Genauigkeit: {args.accuracy}")
 
 
+def cmd_transcribe(args):
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        print("Fehler: faster-whisper nicht installiert. Bitte 'pip install faster-whisper' ausführen.", file=sys.stderr)
+        sys.exit(1)
+
+    audio_path = args.file
+    if not os.path.isfile(audio_path):
+        print(f"Fehler: Datei '{audio_path}' nicht gefunden.", file=sys.stderr)
+        sys.exit(1)
+
+    model_size = args.model
+    language = args.language
+
+    print(f"Lade Modell '{model_size}'...", file=sys.stderr)
+    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+
+    print(f"Transkribiere '{os.path.basename(audio_path)}'...", file=sys.stderr)
+    segments, info = model.transcribe(audio_path, language=language)
+
+    print(f"Sprache: {info.language} (Konfidenz: {info.language_probability:.0%})\n", file=sys.stderr)
+
+    full_text = []
+    for segment in segments:
+        full_text.append(segment.text.strip())
+
+    transcript = " ".join(full_text)
+    print(transcript)
+
+
 def cmd_export(args):
     db = get_db()
 
@@ -487,6 +525,13 @@ def main():
                        help="Genauigkeit: correct, partially_correct, wrong")
     p_res.add_argument("--lessons", help="Lessons Learned (optional)")
 
+    # transcribe
+    p_trans = sub.add_parser("transcribe", help="Audio-Datei transkribieren (lokal via Whisper)")
+    p_trans.add_argument("file", help="Pfad zur Audio-Datei (.ogg, .mp3, .wav, ...)")
+    p_trans.add_argument("--model", default="base", choices=["tiny", "base", "small", "medium"],
+                         help="Whisper-Modell (Default: base)")
+    p_trans.add_argument("--language", default="de", help="Sprache (Default: de)")
+
     # export
     sub.add_parser("export", help="Formatierten Export f\u00fcr Claude-Chat")
 
@@ -503,6 +548,7 @@ def main():
         "theses": cmd_theses,
         "resolve": cmd_resolve,
         "export": cmd_export,
+        "transcribe": cmd_transcribe,
     }
 
     commands[args.command](args)

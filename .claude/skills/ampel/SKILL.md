@@ -1,3 +1,9 @@
+---
+name: ampel
+description: Vollständige Ampel-Analyse durchführen (Marktdaten holen, analysieren, in MongoDB speichern)
+user-invocable: true
+---
+
 # Ampel-Analyse durchführen
 
 Du führst eine vollständige Argus-Ampel-Analyse durch. Folge diesen Schritten exakt:
