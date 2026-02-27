@@ -43,6 +43,9 @@
       <!-- Market Data -->
       <MarketDataCard :market="analysis.market" />
 
+      <!-- Market Context (LLM-Interpretation der erweiterten Daten) -->
+      <MarketContextCard v-if="analysis.market_context" :context="analysis.market_context" />
+
       <!-- Sentiment Events -->
       <SentimentEvents
         v-if="analysis.sentiment_events?.length"
@@ -66,6 +69,7 @@ import Button from 'primevue/button'
 import AmpelHeader from '@/components/features/ampel/AmpelHeader.vue'
 import SignalCard from '@/components/features/ampel/SignalCard.vue'
 import MarketDataCard from '@/components/features/ampel/MarketDataCard.vue'
+import MarketContextCard from '@/components/features/ampel/MarketContextCard.vue'
 import SentimentEvents from '@/components/features/ampel/SentimentEvents.vue'
 import ThesisCard from '@/components/features/ampel/ThesisCard.vue'
 import RecommendationCard from '@/components/features/ampel/RecommendationCard.vue'
@@ -168,8 +172,9 @@ onMounted(() => {
   }
 }
 
-// Gap between market data and sentiment
+// Gap between cards
 .ampel-view > :deep(.market-data-card),
+.ampel-view > :deep(.market-context-card),
 .ampel-view > :deep(.sentiment-events) {
   margin-bottom: 1.5rem;
 }
