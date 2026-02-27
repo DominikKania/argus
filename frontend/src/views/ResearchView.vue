@@ -16,7 +16,7 @@
           Deep Research
           <span v-if="researchStore.topics.length" class="count-badge">{{ researchStore.topics.length }}</span>
         </h1>
-        <Button label="Neues Thema" icon="pi pi-plus" size="small" @click="showNewDialog = true; createError = ''" />
+        <Button label="Neues Thema" icon="pi pi-plus" size="small" @click="showNewDialog = true; createError = ''; newDirection = ''" />
       </div>
 
       <div class="master-detail">
@@ -93,15 +93,26 @@
           <div class="prompt-section">
             <div class="section-header">
               <label class="section-label">Research-Prompt</label>
-              <Button
-                label="Prompt generieren"
-                icon="pi pi-sparkles"
-                size="small"
-                severity="secondary"
-                text
-                :loading="generatingPrompt"
-                @click="regeneratePrompt"
-              />
+              <div class="section-actions">
+                <Button
+                  label="Besprechen"
+                  icon="pi pi-comments"
+                  size="small"
+                  severity="secondary"
+                  text
+                  :disabled="!editablePrompt.trim()"
+                  @click="chatAboutPrompt"
+                />
+                <Button
+                  label="Generieren"
+                  icon="pi pi-sparkles"
+                  size="small"
+                  severity="secondary"
+                  text
+                  :loading="generatingPrompt"
+                  @click="regeneratePrompt"
+                />
+              </div>
             </div>
             <textarea
               v-model="editablePrompt"
@@ -161,9 +172,17 @@
           placeholder="z.B. Trump Zollpolitik"
           class="w-full"
           :disabled="creating"
-          @keydown.enter="createNewTopic"
         />
-        <small class="form-hint">Ein KI-Prompt wird automatisch generiert.</small>
+        <label class="form-label">Fokus / Richtung <small class="optional-hint">(optional)</small></label>
+        <Textarea
+          v-model="newDirection"
+          placeholder="z.B. Auswirkungen auf europäische Exporteure, Vergeltungsmaßnahmen der EU, historische Parallelen zu 2018..."
+          class="w-full"
+          :disabled="creating"
+          rows="3"
+          autoResize
+        />
+        <small class="form-hint">Beschreibe grob worauf der Research-Prompt fokussieren soll. Die KI baut daraus einen detaillierten Prompt.</small>
         <div v-if="createError" class="create-error">
           <i class="pi pi-exclamation-circle" />
           {{ createError }}
@@ -186,6 +205,7 @@ import Skeleton from 'primevue/skeleton'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
+import Textarea from 'primevue/textarea'
 import { marked } from 'marked'
 
 const researchStore = useResearchStore()
@@ -193,6 +213,7 @@ const chatStore = useChatStore()
 
 const showNewDialog = ref(false)
 const newTitle = ref('')
+const newDirection = ref('')
 const creating = ref(false)
 const createError = ref('')
 const generatingPrompt = ref(false)
@@ -236,6 +257,7 @@ function selectTopic(topic: Research) {
 function closeNewDialog() {
   showNewDialog.value = false
   newTitle.value = ''
+  newDirection.value = ''
   createError.value = ''
 }
 
@@ -243,7 +265,11 @@ async function createNewTopic() {
   if (!newTitle.value.trim()) return
   creating.value = true
   createError.value = ''
-  const created = await researchStore.createTopic(newTitle.value.trim())
+  const created = await researchStore.createTopic(
+    newTitle.value.trim(),
+    undefined,
+    newDirection.value.trim() || undefined,
+  )
   creating.value = false
   if (created) {
     closeNewDialog()
@@ -279,6 +305,14 @@ async function runSelected() {
 async function deleteSelected() {
   if (!researchStore.selectedTopic) return
   await researchStore.deleteTopic(researchStore.selectedTopic._id)
+}
+
+function chatAboutPrompt() {
+  if (!researchStore.selectedTopic || !editablePrompt.value.trim()) return
+  const t = researchStore.selectedTopic
+  chatStore.openWithContext(
+    `Ich möchte meinen Research-Prompt verbessern. Überprüfe ihn und gib mir konkretes Feedback — was fehlt, was ist zu vage, was könnte schärfer formuliert sein?\n\n**Thema:** ${t.title}\n\n**Aktueller Prompt:**\n${editablePrompt.value}`
+  )
 }
 
 function askAbout() {
@@ -516,6 +550,11 @@ onMounted(() => {
   .section-label { margin-bottom: 0; }
 }
 
+.section-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
 .section-label {
   display: block;
   font-size: 0.75rem;
@@ -682,6 +721,11 @@ onMounted(() => {
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--p-text-color);
+
+  .optional-hint {
+    font-weight: 400;
+    color: var(--p-text-color-secondary);
+  }
 }
 
 .form-hint {

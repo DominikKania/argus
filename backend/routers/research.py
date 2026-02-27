@@ -156,6 +156,7 @@ Zusammenfassende Bewertung
 class CreateResearchRequest(BaseModel):
     title: str
     prompt: Optional[str] = None
+    direction: Optional[str] = None
 
 
 class UpdateResearchRequest(BaseModel):
@@ -165,6 +166,7 @@ class UpdateResearchRequest(BaseModel):
 
 class GeneratePromptRequest(BaseModel):
     title: str
+    direction: Optional[str] = None
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
@@ -212,9 +214,12 @@ def create_topic(req: CreateResearchRequest):
     status = "ready"
     if not prompt:
         try:
+            user_msg = f"Erstelle einen Research-Prompt zum Thema: {req.title}"
+            if req.direction:
+                user_msg += f"\n\nFokus/Richtung des Users: {req.direction}"
             prompt = call_llm(
                 PROMPT_HELPER_SYSTEM,
-                [{"role": "user", "content": f"Erstelle einen Research-Prompt zum Thema: {req.title}"}],
+                [{"role": "user", "content": user_msg}],
             )
             status = "ready"
         except Exception as e:
@@ -244,9 +249,12 @@ def create_topic(req: CreateResearchRequest):
 def generate_prompt(req: GeneratePromptRequest):
     """Generate a research prompt without saving (for preview)."""
     try:
+        user_msg = f"Erstelle einen Research-Prompt zum Thema: {req.title}"
+        if req.direction:
+            user_msg += f"\n\nFokus/Richtung des Users: {req.direction}"
         prompt = call_llm(
             PROMPT_HELPER_SYSTEM,
-            [{"role": "user", "content": f"Erstelle einen Research-Prompt zum Thema: {req.title}"}],
+            [{"role": "user", "content": user_msg}],
         )
         return {"prompt": prompt}
     except Exception as e:

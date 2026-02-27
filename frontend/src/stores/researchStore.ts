@@ -37,13 +37,14 @@ export const useResearchStore = defineStore('research', () => {
     }
   }
 
-  async function createTopic(title: string, prompt?: string): Promise<Research | null> {
+  async function createTopic(title: string, prompt?: string, direction?: string): Promise<Research | null> {
     loading.value = true
     error.value = null
     try {
       const created = await ApiService.post<Research>(API_ENDPOINTS.RESEARCH.CREATE, {
         title,
         prompt: prompt || undefined,
+        direction: direction || undefined,
       })
       topics.value.unshift(created)
       selectedTopic.value = created
@@ -115,11 +116,11 @@ export const useResearchStore = defineStore('research', () => {
     }
   }
 
-  async function generatePrompt(title: string): Promise<string | null> {
+  async function generatePrompt(title: string, direction?: string): Promise<string | null> {
     try {
       const res = await ApiService.post<{ prompt: string }>(
         API_ENDPOINTS.RESEARCH.GENERATE_PROMPT,
-        { title },
+        { title, direction: direction || undefined },
       )
       return res.prompt
     } catch (err) {
