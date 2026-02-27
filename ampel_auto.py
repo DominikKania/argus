@@ -421,11 +421,15 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
     """
     date_str = date_override or datetime.now().strftime("%Y-%m-%d")
 
-    # Duplikat-Check
-    if not dry_run and db.analyses.find_one({"date": date_str}):
-        log.info("Analyse für %s existiert bereits — überspringe.", date_str)
-        print(f"Analyse für {date_str} existiert bereits.")
-        return None
+    # Bestehende Analyse für diesen Tag löschen (ermöglicht wiederholtes Testen)
+    if not dry_run:
+        existing = db.analyses.find_one({"date": date_str})
+        if existing:
+            db.analyses.delete_one({"date": date_str})
+            # Zugehörige These auch löschen
+            db.theses.delete_many({"analysis_id": existing["_id"]})
+            log.info("Bestehende Analyse für %s gelöscht.", date_str)
+            print(f"Bestehende Analyse für {date_str} gelöscht — wird neu erstellt.")
 
     # 1. Marktdaten holen
     log.info("=== Auto-Ampel Start für %s ===", date_str)
