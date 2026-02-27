@@ -8,10 +8,13 @@
       </button>
     </h3>
     <div class="context-grid">
-      <div v-for="item in contextItems" :key="item.key" class="context-item">
+      <div v-for="item in contextItems" :key="item.key" class="context-item" @click="askAboutItem(item)">
         <div class="context-header">
           <i :class="item.icon" class="context-icon" />
           <span class="context-label">{{ item.label }}</span>
+          <button class="item-chat-trigger" v-tooltip.top="'Mehr erfahren'">
+            <i class="pi pi-comments" />
+          </button>
         </div>
         <p class="context-text">{{ item.text }}</p>
       </div>
@@ -34,6 +37,12 @@ function askAbout() {
   const summary = contextItems.value.map(i => `${i.label}: ${i.text}`).join('\n')
   chatStore.openWithContext(
     `Erkläre mir den aktuellen Markt-Kontext:\n${summary}`
+  )
+}
+
+function askAboutItem(item: { label: string; text: string }) {
+  chatStore.openWithContext(
+    `Erkläre mir "${item.label}" genauer. Was bedeutet das für mein MSCI World ETF?\n\nAktuelle Einschätzung: ${item.text}`
   )
 }
 
@@ -110,10 +119,14 @@ const contextItems = computed(() => {
   border-radius: 8px;
   background: var(--p-surface-ground);
   border: 1px solid transparent;
-  transition: border-color 0.15s;
+  transition: all 0.15s;
+  cursor: pointer;
 
   &:hover {
-    border-color: var(--p-surface-border);
+    border-color: var(--p-primary-300);
+    background: var(--p-surface-hover);
+
+    .item-chat-trigger { opacity: 1; }
   }
 }
 
@@ -122,6 +135,21 @@ const contextItems = computed(() => {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.375rem;
+}
+
+.item-chat-trigger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.125rem 0.25rem;
+  border-radius: 4px;
+  color: var(--p-text-color-secondary);
+  opacity: 0;
+  transition: all 0.15s;
+  font-size: 0.75rem;
+  margin-left: auto;
+
+  &:hover { color: var(--p-primary-500); }
 }
 
 .context-icon {
