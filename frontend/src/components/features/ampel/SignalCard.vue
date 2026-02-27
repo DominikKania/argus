@@ -2,9 +2,14 @@
   <div class="signal-card" :class="cardClass">
     <div class="signal-header">
       <span class="signal-name">{{ displayName }}</span>
-      <div class="signal-dots">
-        <span v-tooltip.top="'Mechanisch'" class="signal-dot" :class="dotClass(signal.mechanical)" />
-        <span v-tooltip.top="'Kontext'" class="signal-dot" :class="dotClass(signal.context)" />
+      <div class="signal-actions">
+        <div class="signal-dots">
+          <span v-tooltip.top="'Mechanisch'" class="signal-dot" :class="dotClass(signal.mechanical)" />
+          <span v-tooltip.top="'Kontext'" class="signal-dot" :class="dotClass(signal.context)" />
+        </div>
+        <button class="chat-trigger" v-tooltip.top="'Frag den Tutor'" @click="askAbout">
+          <i class="pi pi-comments" />
+        </button>
       </div>
     </div>
     <div class="signal-badges">
@@ -16,33 +21,21 @@
         {{ signal.context }}
       </span>
     </div>
-    <p v-if="displayNote" class="signal-note">{{ displayNote }}</p>
+    <p v-if="signal.note" class="signal-note">{{ signal.note }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Signal, SignalColor } from '@/types/ampel'
-import { useDummyModeStore } from '@/stores/dummyModeStore'
-import { useAmpelStore } from '@/stores/ampelStore'
+import { useChatStore } from '@/stores/chatStore'
 
 const props = defineProps<{
   name: string
   signal: Signal
 }>()
 
-const dummyModeStore = useDummyModeStore()
-const ampelStore = useAmpelStore()
-
-const displayNote = computed(() => {
-  if (dummyModeStore.isDummyMode) {
-    const simplified = ampelStore.latestAnalysis?.simplified
-    if (simplified?.signal_notes?.[props.name]) {
-      return simplified.signal_notes[props.name]
-    }
-  }
-  return props.signal.note
-})
+const chatStore = useChatStore()
 
 const nameMap: Record<string, string> = {
   trend: 'Trend',
@@ -52,6 +45,12 @@ const nameMap: Record<string, string> = {
 }
 
 const displayName = computed(() => nameMap[props.name] || props.name)
+
+function askAbout() {
+  chatStore.openWithContext(
+    `Erkläre mir das ${displayName.value}-Signal: ${props.signal.note || 'Mechanisch ' + props.signal.mechanical + ', Kontext ' + props.signal.context}`
+  )
+}
 
 const cardClass = computed(() => {
   const ctx = props.signal.context
@@ -101,6 +100,12 @@ const badgeClass = (color: SignalColor) => ({
   color: var(--p-text-color);
 }
 
+.signal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .signal-dots {
   display: flex;
   gap: 0.375rem;
@@ -116,6 +121,21 @@ const badgeClass = (color: SignalColor) => ({
   &.dot-green { background-color: #10b981; }
   &.dot-yellow { background-color: #f59e0b; }
   &.dot-red { background-color: #ef4444; }
+}
+
+.chat-trigger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  color: var(--p-text-color-secondary);
+  opacity: 0;
+  transition: all 0.15s;
+  font-size: 0.875rem;
+
+  .signal-card:hover & { opacity: 0.6; }
+  &:hover { opacity: 1 !important; color: var(--p-primary-500); background: var(--p-surface-ground); }
 }
 
 .signal-badges {

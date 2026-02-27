@@ -135,7 +135,7 @@
           <i class="pi pi-directions" />
           Empfehlung
         </h3>
-        <p class="recommendation-text">{{ displayRecommendation }}</p>
+        <p class="recommendation-text">{{ analysis?.recommendation.detail || '' }}</p>
       </div>
     </template>
   </div>
@@ -145,21 +145,12 @@
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAmpelStore } from '@/stores/ampelStore'
-import { useDummyModeStore } from '@/stores/dummyModeStore'
 import Skeleton from 'primevue/skeleton'
 import Button from 'primevue/button'
 
 const ampelStore = useAmpelStore()
-const dummyModeStore = useDummyModeStore()
 const router = useRouter()
 const analysis = computed(() => ampelStore.latestAnalysis)
-
-const displayRecommendation = computed(() => {
-  if (dummyModeStore.isDummyMode && analysis.value?.simplified?.recommendation_detail) {
-    return analysis.value.simplified.recommendation_detail
-  }
-  return analysis.value?.recommendation.detail || ''
-})
 
 const signalOrder = ['trend', 'volatility', 'macro', 'sentiment'] as const
 const signalLabels: Record<string, string> = {

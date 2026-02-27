@@ -12,17 +12,22 @@
         :class="{ 'event-primary': event.is_primary }"
       >
         <div class="event-header">
-          <span class="event-headline">{{ displayEvent(event, index).headline }}</span>
-          <div class="event-badges">
-            <span class="impact-badge" :class="impactClass(event.affects_portfolio)">
-              {{ impactLabel(event.affects_portfolio) }}
-            </span>
-            <span class="risk-badge" :class="riskClass(event.cascade_risk)">
-              {{ riskLabel(event.cascade_risk) }}
-            </span>
+          <span class="event-headline">{{ event.headline }}</span>
+          <div class="event-actions">
+            <div class="event-badges">
+              <span class="impact-badge" :class="impactClass(event.affects_portfolio)">
+                {{ impactLabel(event.affects_portfolio) }}
+              </span>
+              <span class="risk-badge" :class="riskClass(event.cascade_risk)">
+                {{ riskLabel(event.cascade_risk) }}
+              </span>
+            </div>
+            <button class="chat-trigger" v-tooltip.top="'Frag den Tutor'" @click="askAbout(event)">
+              <i class="pi pi-comments" />
+            </button>
           </div>
         </div>
-        <p v-if="displayEvent(event, index).summary" class="event-summary">{{ displayEvent(event, index).summary }}</p>
+        <p v-if="event.summary" class="event-summary">{{ event.summary }}</p>
       </div>
     </div>
   </div>
@@ -30,27 +35,18 @@
 
 <script setup lang="ts">
 import type { SentimentEvent } from '@/types/ampel'
-import { useDummyModeStore } from '@/stores/dummyModeStore'
-import { useAmpelStore } from '@/stores/ampelStore'
+import { useChatStore } from '@/stores/chatStore'
 
 defineProps<{
   events: SentimentEvent[]
 }>()
 
-const dummyModeStore = useDummyModeStore()
-const ampelStore = useAmpelStore()
+const chatStore = useChatStore()
 
-const displayEvent = (event: SentimentEvent, index: number) => {
-  if (dummyModeStore.isDummyMode) {
-    const simplified = ampelStore.latestAnalysis?.simplified?.sentiment_events?.[index]
-    if (simplified) {
-      return {
-        headline: simplified.headline || event.headline,
-        summary: simplified.summary || event.summary,
-      }
-    }
-  }
-  return event
+function askAbout(event: SentimentEvent) {
+  chatStore.openWithContext(
+    `Erkläre mir dieses Ereignis und was es für mein Portfolio bedeutet: ${event.headline}${event.summary ? ' — ' + event.summary : ''}`
+  )
 }
 
 const impactLabel = (impact?: string) => {
@@ -136,10 +132,31 @@ const riskClass = (risk?: string) => ({
   flex: 1;
 }
 
+.event-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+
 .event-badges {
   display: flex;
   gap: 0.375rem;
-  flex-shrink: 0;
+}
+
+.chat-trigger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  color: var(--p-text-color-secondary);
+  opacity: 0;
+  transition: all 0.15s;
+  font-size: 0.875rem;
+
+  .event-item:hover & { opacity: 0.6; }
+  &:hover { opacity: 1 !important; color: var(--p-primary-500); background: var(--p-surface-card); }
 }
 
 .event-summary {

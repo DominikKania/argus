@@ -3,11 +3,14 @@
     <h3 class="section-title">
       <i class="pi pi-lightbulb" />
       These
+      <button class="chat-trigger" v-tooltip.top="'Frag den Tutor'" @click="askAbout">
+        <i class="pi pi-comments" />
+      </button>
     </h3>
-    <p class="thesis-statement">{{ displayStatement }}</p>
+    <p class="thesis-statement">{{ thesis.statement }}</p>
     <div v-if="thesis.catalyst" class="catalyst">
       <span class="catalyst-label">Katalysator:</span>
-      <span class="catalyst-text">{{ displayCatalyst }}</span>
+      <span class="catalyst-text">{{ thesis.catalyst }}</span>
       <span v-if="thesis.catalyst_date" class="catalyst-date">
         <i class="pi pi-calendar" />
         {{ thesis.catalyst_date }}
@@ -16,34 +19,31 @@
     <div class="scenarios">
       <div v-if="thesis.expected_if_positive" class="scenario scenario-positive">
         <span class="scenario-icon">+</span>
-        <p class="scenario-text">{{ displayPositive }}</p>
+        <p class="scenario-text">{{ thesis.expected_if_positive }}</p>
       </div>
       <div v-if="thesis.expected_if_negative" class="scenario scenario-negative">
         <span class="scenario-icon">-</span>
-        <p class="scenario-text">{{ displayNegative }}</p>
+        <p class="scenario-text">{{ thesis.expected_if_negative }}</p>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import type { Thesis } from '@/types/ampel'
-import { useDummyModeStore } from '@/stores/dummyModeStore'
-import { useAmpelStore } from '@/stores/ampelStore'
+import { useChatStore } from '@/stores/chatStore'
 
 const props = defineProps<{
   thesis: Thesis
 }>()
 
-const dummyModeStore = useDummyModeStore()
-const ampelStore = useAmpelStore()
-const s = computed(() => dummyModeStore.isDummyMode ? ampelStore.latestAnalysis?.simplified?.thesis : null)
+const chatStore = useChatStore()
 
-const displayStatement = computed(() => s.value?.statement || props.thesis.statement)
-const displayCatalyst = computed(() => s.value?.catalyst || props.thesis.catalyst)
-const displayPositive = computed(() => s.value?.expected_if_positive || props.thesis.expected_if_positive)
-const displayNegative = computed(() => s.value?.expected_if_negative || props.thesis.expected_if_negative)
+function askAbout() {
+  chatStore.openWithContext(
+    `Erkläre mir diese These: ${props.thesis.statement}${props.thesis.catalyst ? ' (Katalysator: ' + props.thesis.catalyst + ')' : ''}`
+  )
+}
 </script>
 
 <style lang="scss" scoped>
@@ -65,7 +65,23 @@ const displayNegative = computed(() => s.value?.expected_if_negative || props.th
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--p-surface-border);
 
-  i { color: var(--p-primary-500); font-size: 1.125rem; }
+  i.pi-lightbulb { color: var(--p-primary-500); font-size: 1.125rem; }
+}
+
+.chat-trigger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  color: var(--p-text-color-secondary);
+  opacity: 0;
+  transition: all 0.15s;
+  font-size: 0.875rem;
+  margin-left: auto;
+
+  .thesis-card:hover & { opacity: 0.6; }
+  &:hover { opacity: 1 !important; color: var(--p-primary-500); background: var(--p-surface-ground); }
 }
 
 .thesis-statement {

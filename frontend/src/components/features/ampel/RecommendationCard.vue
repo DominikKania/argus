@@ -3,23 +3,26 @@
     <h3 class="section-title">
       <i class="pi pi-directions" />
       Empfehlung & Eskalation
+      <button class="chat-trigger" v-tooltip.top="'Frag den Tutor'" @click="askAbout">
+        <i class="pi pi-comments" />
+      </button>
     </h3>
 
     <div class="recommendation-detail">
-      <p class="detail-text">{{ displayDetail }}</p>
+      <p class="detail-text">{{ analysis.recommendation.detail }}</p>
     </div>
 
-    <div v-if="displayReasoning" class="reasoning">
+    <div v-if="analysis.rating.reasoning" class="reasoning">
       <h4 class="sub-title">Begründung</h4>
-      <p class="reasoning-text">{{ displayReasoning }}</p>
+      <p class="reasoning-text">{{ analysis.rating.reasoning }}</p>
     </div>
 
-    <div v-if="displayEscalation" class="escalation">
+    <div v-if="analysis.escalation_trigger" class="escalation">
       <h4 class="sub-title escalation-title">
         <i class="pi pi-exclamation-triangle" />
         Eskalations-Trigger
       </h4>
-      <p class="escalation-text">{{ displayEscalation }}</p>
+      <p class="escalation-text">{{ analysis.escalation_trigger }}</p>
     </div>
 
     <div v-if="analysis.beller_check?.triggered" class="beller-check">
@@ -32,8 +35,8 @@
           {{ analysis.beller_check.trigger_type }}
         </span>
       </div>
-      <p v-if="displayBellerReasoning" class="beller-reasoning">
-        {{ displayBellerReasoning }}
+      <p v-if="analysis.beller_check.reasoning" class="beller-reasoning">
+        {{ analysis.beller_check.reasoning }}
       </p>
     </div>
   </div>
@@ -42,27 +45,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Analysis } from '@/types/ampel'
-import { useDummyModeStore } from '@/stores/dummyModeStore'
+import { useChatStore } from '@/stores/chatStore'
 
 const props = defineProps<{
   analysis: Analysis
 }>()
 
-const dummyModeStore = useDummyModeStore()
-const s = computed(() => dummyModeStore.isDummyMode ? props.analysis.simplified : null)
+const chatStore = useChatStore()
 
-const displayDetail = computed(() =>
-  s.value?.recommendation_detail || props.analysis.recommendation.detail
-)
-const displayReasoning = computed(() =>
-  s.value?.rating_reasoning || props.analysis.rating.reasoning
-)
-const displayEscalation = computed(() =>
-  s.value?.escalation_trigger || props.analysis.escalation_trigger
-)
-const displayBellerReasoning = computed(() =>
-  s.value?.beller_check_reasoning || props.analysis.beller_check?.reasoning
-)
+function askAbout() {
+  chatStore.openWithContext(
+    `Erkläre mir die aktuelle Empfehlung: ${props.analysis.recommendation.detail}`
+  )
+}
 
 const bellerLabel = computed(() => {
   const map: Record<string, string> = { beller: 'Beller', beisser: 'Beisser', unclear: 'Unklar' }
@@ -95,7 +90,23 @@ const bellerClass = computed(() => ({
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--p-surface-border);
 
-  i { color: var(--p-primary-500); font-size: 1.125rem; }
+  i.pi-directions { color: var(--p-primary-500); font-size: 1.125rem; }
+}
+
+.chat-trigger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  color: var(--p-text-color-secondary);
+  opacity: 0;
+  transition: all 0.15s;
+  font-size: 0.875rem;
+  margin-left: auto;
+
+  .recommendation-card:hover & { opacity: 0.6; }
+  &:hover { opacity: 1 !important; color: var(--p-primary-500); background: var(--p-surface-ground); }
 }
 
 .sub-title {

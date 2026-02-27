@@ -3,6 +3,9 @@
     <h3 class="section-title">
       <i class="pi pi-chart-line" />
       Marktdaten
+      <button class="chat-trigger" v-tooltip.top="'Frag den Tutor'" @click="askAbout">
+        <i class="pi pi-comments" />
+      </button>
     </h3>
     <div class="data-grid">
       <!-- Kurs-Daten -->
@@ -13,15 +16,15 @@
           <span class="data-value font-bold">{{ market.price.toFixed(2) }} €</span>
         </div>
         <div class="data-row">
-          <span class="data-label">{{ label('SMA 50', '50-Tage-Schnitt') }}</span>
+          <span class="data-label">SMA 50</span>
           <span class="data-value">{{ market.sma50.toFixed(2) }} €</span>
         </div>
         <div class="data-row">
-          <span class="data-label">{{ label('SMA 200', '200-Tage-Schnitt') }}</span>
+          <span class="data-label">SMA 200</span>
           <span class="data-value">{{ market.sma200.toFixed(2) }} €</span>
         </div>
         <div class="data-row">
-          <span class="data-label">{{ label('ATH', 'Allzeithoch') }}</span>
+          <span class="data-label">ATH</span>
           <span class="data-value">
             {{ market.ath.toFixed(2) }} €
             <span class="delta" :class="market.delta_ath_pct < -5 ? 'delta-bad' : 'delta-ok'">
@@ -30,13 +33,13 @@
           </span>
         </div>
         <div class="data-row">
-          <span class="data-label">{{ label('Puffer SMA50', 'Abstand zum 50-Tage-Schnitt') }}</span>
+          <span class="data-label">Puffer SMA50</span>
           <span class="data-value" :class="market.puffer_sma50_pct < 2 ? 'value-warn' : ''">
             {{ market.puffer_sma50_pct.toFixed(1) }}%
           </span>
         </div>
         <div class="data-row">
-          <span class="data-label">{{ label('Golden Cross', 'Trend-Signal') }}</span>
+          <span class="data-label">Golden Cross</span>
           <span class="data-value">
             <span class="gc-badge" :class="market.golden_cross ? 'gc-yes' : 'gc-no'">
               {{ market.golden_cross ? 'Ja' : 'Nein' }}
@@ -49,14 +52,14 @@
       <div class="data-column">
         <h4 class="column-title">VIX & Makro</h4>
         <div class="data-row">
-          <span class="data-label">{{ label('VIX', 'Angstbarometer') }}</span>
+          <span class="data-label">VIX</span>
           <span class="data-value" :class="vixClass">
             {{ market.vix.value.toFixed(1) }}
             <i :class="directionIcon(market.vix.direction)" class="direction-arrow" />
           </span>
         </div>
         <div class="data-row">
-          <span class="data-label">{{ label('VIX Vorwoche', 'Angstbarometer Vorwoche') }}</span>
+          <span class="data-label">VIX Vorwoche</span>
           <span class="data-value">{{ market.vix.prev_week.toFixed(1) }}</span>
         </div>
         <div class="data-row">
@@ -68,18 +71,18 @@
           <span class="data-value">{{ market.yields.us2y.toFixed(2) }}%</span>
         </div>
         <div class="data-row">
-          <span class="data-label">{{ label('Spread', 'Zinsdifferenz') }}</span>
+          <span class="data-label">Spread</span>
           <span class="data-value" :class="market.yields.spread <= 0 ? 'value-bad' : ''">
             {{ market.yields.spread.toFixed(2) }}%
             <i :class="directionIcon(market.yields.spread_direction)" class="direction-arrow" />
           </span>
         </div>
         <div class="data-row">
-          <span class="data-label">{{ label('Real Yield', 'Realzins') }}</span>
+          <span class="data-label">Real Yield</span>
           <span class="data-value">{{ market.yields.real_yield.toFixed(2) }}%</span>
         </div>
         <div class="data-row">
-          <span class="data-label">{{ label('CPI', 'Inflation') }}</span>
+          <span class="data-label">CPI</span>
           <span class="data-value">{{ market.yields.cpi.toFixed(1) }}%</span>
         </div>
       </div>
@@ -90,16 +93,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { MarketData } from '@/types/ampel'
-import { useDummyModeStore } from '@/stores/dummyModeStore'
+import { useChatStore } from '@/stores/chatStore'
 
 const props = defineProps<{
   market: MarketData
 }>()
 
-const dummyModeStore = useDummyModeStore()
+const chatStore = useChatStore()
 
-const label = (expert: string, simple: string) =>
-  dummyModeStore.isDummyMode ? simple : expert
+function askAbout() {
+  chatStore.openWithContext(
+    `Erkläre mir die aktuellen Marktdaten: IWDA bei ${props.market.price.toFixed(2)}€, VIX bei ${props.market.vix.value.toFixed(1)}, Golden Cross ${props.market.golden_cross ? 'aktiv' : 'nicht aktiv'}`
+  )
+}
 
 const vixClass = computed(() => {
   if (props.market.vix.value > 30) return 'value-bad'
@@ -133,7 +139,23 @@ const directionIcon = (dir: string) => {
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--p-surface-border);
 
-  i { color: var(--p-primary-500); font-size: 1.125rem; }
+  i.pi-chart-line { color: var(--p-primary-500); font-size: 1.125rem; }
+}
+
+.chat-trigger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  color: var(--p-text-color-secondary);
+  opacity: 0;
+  transition: all 0.15s;
+  font-size: 0.875rem;
+  margin-left: auto;
+
+  .market-data-card:hover & { opacity: 0.6; }
+  &:hover { opacity: 1 !important; color: var(--p-primary-500); background: var(--p-surface-ground); }
 }
 
 .data-grid {

@@ -15,31 +15,28 @@
     </div>
 
     <div class="topbar-right">
-      <div class="dummy-mode-toggle">
-        <i class="pi pi-question-circle toggle-icon" />
-        <span class="toggle-label">Einfach</span>
-        <ToggleSwitch v-model="dummyMode" />
-      </div>
+      <Button
+        icon="pi pi-comments"
+        text
+        rounded
+        :badge="chatStore.messages.length ? String(chatStore.messages.length) : undefined"
+        badge-severity="info"
+        v-tooltip.bottom="'Trading-Tutor'"
+        @click="chatStore.toggleChat()"
+      />
       <ThemeSelector />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import Button from 'primevue/button'
-import ToggleSwitch from 'primevue/toggleswitch'
 import { useNavigation } from '@/composables/useNavigation'
-import { useDummyModeStore } from '@/stores/dummyModeStore'
+import { useChatStore } from '@/stores/chatStore'
 import ThemeSelector from '@/components/common/ThemeSelector.vue'
 
 const { toggleSidebar, isExpanded } = useNavigation()
-const dummyModeStore = useDummyModeStore()
-
-const dummyMode = computed({
-  get: () => dummyModeStore.isDummyMode,
-  set: () => dummyModeStore.toggleDummyMode(),
-})
+const chatStore = useChatStore()
 </script>
 
 <style lang="scss" scoped>
@@ -102,7 +99,7 @@ const dummyMode = computed({
     margin-left: auto;
     height: 100%;
     flex-shrink: 0;
-    gap: 0.5rem;
+    gap: 0.25rem;
   }
 }
 
@@ -120,34 +117,6 @@ const dummyMode = computed({
       border-left: none;
       margin: 0;
     }
-
-    .topbar-right {
-      gap: 0.25rem;
-    }
-  }
-}
-
-.dummy-mode-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding-right: 0.75rem;
-  border-right: 1px solid var(--p-surface-border);
-
-  .toggle-icon {
-    font-size: 0.875rem;
-    color: var(--p-text-color-secondary);
-  }
-
-  .toggle-label {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--p-text-color-secondary);
-    white-space: nowrap;
-  }
-
-  @media screen and (max-width: 640px) {
-    .toggle-label { display: none; }
   }
 }
 </style>

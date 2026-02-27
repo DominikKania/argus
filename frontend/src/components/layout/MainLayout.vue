@@ -10,6 +10,8 @@
         <router-view />
       </div>
     </div>
+
+    <ChatDrawer />
   </div>
 </template>
 
@@ -18,6 +20,7 @@ import { useNavigation } from '@/composables/useNavigation'
 import TopBar from '@/components/navigation/TopBar.vue'
 import DesktopSidebar from '@/components/navigation/DesktopSidebar.vue'
 import MobileSidebar from '@/components/navigation/MobileSidebar.vue'
+import ChatDrawer from '@/components/features/chat/ChatDrawer.vue'
 
 const { isExpanded } = useNavigation()
 </script>
