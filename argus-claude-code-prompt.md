@@ -65,6 +65,7 @@ Wir fangen simpel an und bauen aus.
   "sentiment_events": [
     {
       "headline": "Software-Sektor Selloff beschleunigt sich",
+      "summary": "Cisco verliert 12,3% nach schwachen Cloud-Guidance, $450 Mrd Wertverlust im Tech-Sektor an einem Tag. Rotation aus Software in Industriewerte beschleunigt sich.",
       "affects_portfolio": "sector_only",
       "cascade_risk": "medium",
       "is_primary": true

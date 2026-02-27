@@ -54,8 +54,9 @@ Recherchiere IMMER via Web Search — keine Schätzungen, keine veralteten Daten
 - Die **3 wichtigsten** Nachrichten der letzten 48h, die mein Portfolio betreffen
 - Für jede Nachricht:
   1. Kernaussage (1 Satz)
-  2. Trifft es mein Portfolio direkt oder nur einen Teilsektor?
-  3. Kaskadenrisiko: Kann das über den direkten Effekt hinaus eskalieren?
+  2. Kontext-Zusammenfassung (2-3 Sätze): Was genau ist passiert, warum ist es relevant, wie hat der Markt reagiert?
+  3. Trifft es mein Portfolio direkt oder nur einen Teilsektor?
+  4. Kaskadenrisiko: Kann das über den direkten Effekt hinaus eskalieren?
 - **Pflicht-Frage:** Welche EINE Nachricht hat das größte Kaskadenpotenzial für mein Portfolio? (Diese Nachricht bestimmt die Sentiment-Ampel.)
 - 🟢 Kein Risiko | 🟡 Erhöht | 🔴 Hoch
 

@@ -147,11 +147,43 @@ def validate_analysis(data):
     for i, evt in enumerate(data.get("sentiment_events", []) or []):
         if "headline" not in evt:
             errors.append(f"'sentiment_events[{i}].headline' fehlt.")
+        if "summary" not in evt:
+            errors.append(f"'sentiment_events[{i}].summary' fehlt.")
 
     return errors
 
 
 # ── Befehle ─────────────────────────────────────────────────────────────────
+
+def save_analysis(db, data):
+    """Speichert eine validierte Analyse in MongoDB und erstellt ggf. eine These.
+
+    Wird von cmd_save() und ampel_auto.run_auto_ampel() genutzt.
+    """
+    result = db.analyses.insert_one(data)
+    analysis_id = result.inserted_id
+    print(f"Analyse gespeichert: {data['date']} | {OVERALL_DISPLAY.get(data['rating']['overall'], data['rating']['overall'])}")
+
+    # These automatisch anlegen wenn vorhanden
+    thesis_data = data.get("thesis")
+    if thesis_data and thesis_data.get("statement"):
+        thesis_doc = {
+            "created_date": data["date"],
+            "analysis_id": analysis_id,
+            "statement": thesis_data["statement"],
+            "catalyst": thesis_data.get("catalyst"),
+            "catalyst_date": thesis_data.get("catalyst_date"),
+            "expected_if_positive": thesis_data.get("expected_if_positive"),
+            "expected_if_negative": thesis_data.get("expected_if_negative"),
+            "status": "open",
+            "resolution": None,
+            "resolution_date": None,
+            "accuracy": None,
+            "lessons_learned": None,
+        }
+        db.theses.insert_one(thesis_doc)
+        print(f"These angelegt: {thesis_data['statement'][:60]}...")
+
 
 def cmd_save(args):
     db = get_db()
@@ -185,29 +217,7 @@ def cmd_save(args):
         print(f"Fehler: Analyse f\u00fcr {data['date']} existiert bereits. L\u00f6sche sie zuerst oder w\u00e4hle ein anderes Datum.", file=sys.stderr)
         sys.exit(1)
 
-    result = db.analyses.insert_one(data)
-    analysis_id = result.inserted_id
-    print(f"Analyse gespeichert: {data['date']} | {OVERALL_DISPLAY.get(data['rating']['overall'], data['rating']['overall'])}")
-
-    # These automatisch anlegen wenn vorhanden
-    thesis_data = data.get("thesis")
-    if thesis_data and thesis_data.get("statement"):
-        thesis_doc = {
-            "created_date": data["date"],
-            "analysis_id": analysis_id,
-            "statement": thesis_data["statement"],
-            "catalyst": thesis_data.get("catalyst"),
-            "catalyst_date": thesis_data.get("catalyst_date"),
-            "expected_if_positive": thesis_data.get("expected_if_positive"),
-            "expected_if_negative": thesis_data.get("expected_if_negative"),
-            "status": "open",
-            "resolution": None,
-            "resolution_date": None,
-            "accuracy": None,
-            "lessons_learned": None,
-        }
-        db.theses.insert_one(thesis_doc)
-        print(f"These angelegt: {thesis_data['statement'][:60]}...")
+    save_analysis(db, data)
 
 
 def cmd_latest(args):
@@ -320,6 +330,25 @@ def cmd_transcribe(args):
 
     transcript = " ".join(full_text)
     print(transcript)
+
+
+def cmd_auto_ampel(args):
+    from ampel_auto import setup_logging, run_auto_ampel
+
+    setup_logging()
+    db = get_db()
+    ensure_indexes(db)
+
+    result = run_auto_ampel(
+        db,
+        date_override=args.date,
+        cpi_override=args.cpi,
+        dry_run=args.dry_run,
+    )
+
+    if result and not args.dry_run:
+        print()
+        print_analysis_detail(result)
 
 
 def cmd_export(args):
@@ -487,8 +516,11 @@ def print_analysis_detail(doc):
     if events:
         print(f"\n  Sentiment-Events:")
         for evt in events:
-            primary = " [PRIM\u00c4R]" if evt.get("is_primary") else ""
+            primary = " [PRIMÄR]" if evt.get("is_primary") else ""
             print(f"    - {evt['headline']}{primary} (Risiko: {evt.get('cascade_risk', '?')})")
+            summary = evt.get("summary")
+            if summary:
+                print(f"      → {summary}")
 
     print()
 
@@ -532,6 +564,12 @@ def main():
                          help="Whisper-Modell (Default: base)")
     p_trans.add_argument("--language", default="de", help="Sprache (Default: de)")
 
+    # auto-ampel
+    p_auto = sub.add_parser("auto-ampel", help="Vollautomatische Ampel-Analyse durchf\u00fchren")
+    p_auto.add_argument("--cpi", type=float, help="CPI-Wert \u00fcberschreiben (z.B. bei neuer Ver\u00f6ffentlichung)")
+    p_auto.add_argument("--dry-run", action="store_true", help="Analyse anzeigen, aber nicht speichern")
+    p_auto.add_argument("--date", help="Datum \u00fcberschreiben (YYYY-MM-DD, Default: heute)")
+
     # export
     sub.add_parser("export", help="Formatierten Export f\u00fcr Claude-Chat")
 
@@ -549,6 +587,7 @@ def main():
         "resolve": cmd_resolve,
         "export": cmd_export,
         "transcribe": cmd_transcribe,
+        "auto-ampel": cmd_auto_ampel,
     }
 
     commands[args.command](args)
