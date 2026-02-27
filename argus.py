@@ -73,6 +73,20 @@ def ensure_indexes(db):
     db.analyses.create_index([("date", ASCENDING)], unique=True)
     db.analyses.create_index([("rating.overall", ASCENDING)])
     db.theses.create_index([("status", ASCENDING)])
+    db.prices.create_index([("ticker", ASCENDING), ("date", ASCENDING)], unique=True)
+    db.watchlist.create_index([("ticker", ASCENDING)], unique=True)
+
+    # IWDA.AS als Default-Eintrag
+    db.watchlist.update_one(
+        {"ticker": "IWDA.AS"},
+        {"$setOnInsert": {
+            "ticker": "IWDA.AS",
+            "name": "iShares Core MSCI World UCITS ETF",
+            "added_date": datetime.now().strftime("%Y-%m-%d"),
+            "category": "etf",
+        }},
+        upsert=True,
+    )
 
 
 # ── Validierung ─────────────────────────────────────────────────────────────
@@ -351,6 +365,167 @@ def cmd_auto_ampel(args):
         print_analysis_detail(result)
 
 
+def cmd_watchlist(args):
+    db = get_db()
+    ensure_indexes(db)
+
+    action = args.watchlist_action or "show"
+
+    if action == "show":
+        docs = list(db.watchlist.find().sort("ticker", 1))
+        if not docs:
+            print("Watchlist ist leer.")
+            return
+        print(f"\n{'Ticker':<12} {'Name':<40} {'Kategorie':<10} {'Hinzugefügt'}")
+        print("-" * 80)
+        for doc in docs:
+            print(f"{doc['ticker']:<12} {doc.get('name', '?'):<40} {doc.get('category', '?'):<10} {doc.get('added_date', '?')}")
+        print()
+
+    elif action == "add":
+        import yfinance as yf
+        for ticker in args.tickers:
+            ticker = ticker.upper()
+            try:
+                info = yf.Ticker(ticker).info
+                name = info.get("shortName") or info.get("longName") or ticker
+            except Exception:
+                name = ticker
+            doc = {
+                "ticker": ticker,
+                "name": name,
+                "added_date": datetime.now().strftime("%Y-%m-%d"),
+                "category": "etf" if any(k in ticker.upper() for k in ["IWDA", "EUNL", "ETF"]) else "stock",
+            }
+            db.watchlist.update_one({"ticker": ticker}, {"$set": doc}, upsert=True)
+            print(f"Hinzugefügt: {ticker} — {name}")
+
+    elif action == "remove":
+        ticker = args.ticker.upper()
+        if ticker == "IWDA.AS":
+            print("Fehler: IWDA.AS kann nicht entfernt werden (Default-ETF).", file=sys.stderr)
+            sys.exit(1)
+        result = db.watchlist.delete_one({"ticker": ticker})
+        if result.deleted_count:
+            print(f"Entfernt: {ticker}")
+        else:
+            print(f"Fehler: '{ticker}' nicht in Watchlist.", file=sys.stderr)
+            sys.exit(1)
+
+
+def cmd_fetch(args):
+    import yfinance as yf
+
+    db = get_db()
+    ensure_indexes(db)
+
+    period = args.period or "5d"
+
+    # Ticker bestimmen
+    if args.ticker:
+        tickers = [args.ticker.upper()]
+    else:
+        tickers = [doc["ticker"] for doc in db.watchlist.find().sort("ticker", 1)]
+        if not tickers:
+            print("Watchlist ist leer. Füge zuerst Ticker hinzu: argus.py watchlist add NVDA")
+            return
+
+    for ticker in tickers:
+        try:
+            t = yf.Ticker(ticker)
+            # Für SMA-Berechnung brauchen wir mindestens 200 Tage
+            hist = t.history(period="2y")
+            if hist.empty:
+                print(f"  {ticker}: Keine Daten erhalten", file=sys.stderr)
+                continue
+
+            close = hist["Close"]
+            sma50_series = close.rolling(50).mean()
+            sma200_series = close.rolling(200).mean()
+
+            # Nur den gewünschten Zeitraum speichern
+            if period == "max" or period == "2y":
+                save_hist = hist
+            else:
+                # Anzahl Tage aus period ableiten
+                period_map = {"5d": 5, "1mo": 22, "3mo": 66, "6mo": 132, "1y": 252}
+                days = period_map.get(period, 5)
+                save_hist = hist.tail(days)
+
+            count = 0
+            for idx in save_hist.index:
+                date_str = idx.strftime("%Y-%m-%d")
+                row = save_hist.loc[idx]
+                sma50_val = sma50_series.get(idx)
+                sma200_val = sma200_series.get(idx)
+
+                doc = {
+                    "ticker": ticker,
+                    "date": date_str,
+                    "open": round(float(row["Open"]), 2),
+                    "high": round(float(row["High"]), 2),
+                    "low": round(float(row["Low"]), 2),
+                    "close": round(float(row["Close"]), 2),
+                    "volume": int(row["Volume"]),
+                }
+                if sma50_val and not (sma50_val != sma50_val):  # NaN check
+                    doc["sma50"] = round(float(sma50_val), 2)
+                if sma200_val and not (sma200_val != sma200_val):  # NaN check
+                    doc["sma200"] = round(float(sma200_val), 2)
+
+                db.prices.update_one(
+                    {"ticker": ticker, "date": date_str},
+                    {"$set": doc},
+                    upsert=True,
+                )
+                count += 1
+
+            print(f"{ticker}: {count} Tage gespeichert")
+
+        except Exception as e:
+            print(f"{ticker}: Fehler — {e}", file=sys.stderr)
+
+
+def cmd_prices(args):
+    db = get_db()
+    ticker = args.ticker.upper()
+
+    query = {"ticker": ticker}
+    cursor = db.prices.find(query).sort("date", -1)
+
+    if not args.all:
+        days = args.days or 10
+        cursor = cursor.limit(days)
+
+    docs = list(cursor)
+    if not docs:
+        print(f"Keine Kursdaten für '{ticker}'. Zuerst laden: argus.py fetch --ticker {ticker} --period 1y")
+        return
+
+    # Name aus Watchlist holen
+    wl = db.watchlist.find_one({"ticker": ticker})
+    name = wl["name"] if wl else ticker
+    print(f"\n{ticker} — {name}")
+    print(f"{'Datum':<12} {'Open':>8} {'High':>8} {'Low':>8} {'Close':>8} {'Volume':>10} {'SMA50':>8} {'SMA200':>8}")
+    print("-" * 84)
+
+    for doc in docs:
+        vol = doc.get("volume", 0)
+        if vol >= 1_000_000:
+            vol_str = f"{vol/1_000_000:.1f}M"
+        elif vol >= 1_000:
+            vol_str = f"{vol/1_000:.0f}K"
+        else:
+            vol_str = str(vol)
+
+        sma50 = f"{doc['sma50']:.2f}" if "sma50" in doc else "-"
+        sma200 = f"{doc['sma200']:.2f}" if "sma200" in doc else "-"
+
+        print(f"{doc['date']:<12} {doc['open']:>8.2f} {doc['high']:>8.2f} {doc['low']:>8.2f} {doc['close']:>8.2f} {vol_str:>10} {sma50:>8} {sma200:>8}")
+
+    print()
+
+
 def cmd_export(args):
     db = get_db()
 
@@ -570,8 +745,30 @@ def main():
     p_auto.add_argument("--dry-run", action="store_true", help="Analyse anzeigen, aber nicht speichern")
     p_auto.add_argument("--date", help="Datum \u00fcberschreiben (YYYY-MM-DD, Default: heute)")
 
+    # watchlist
+    p_wl = sub.add_parser("watchlist", help="Watchlist verwalten")
+    wl_sub = p_wl.add_subparsers(dest="watchlist_action")
+    wl_sub.add_parser("show", help="Watchlist anzeigen")
+    p_wl_add = wl_sub.add_parser("add", help="Ticker hinzufügen")
+    p_wl_add.add_argument("tickers", nargs="+", help="Ticker-Symbole (z.B. NVDA AAPL)")
+    p_wl_rm = wl_sub.add_parser("remove", help="Ticker entfernen")
+    p_wl_rm.add_argument("ticker", help="Ticker-Symbol")
+
+    # fetch
+    p_fetch = sub.add_parser("fetch", help="Kursdaten via yfinance holen und speichern")
+    p_fetch.add_argument("--ticker", help="Nur diesen Ticker laden")
+    p_fetch.add_argument("--period", default="5d",
+                         choices=["5d", "1mo", "3mo", "6mo", "1y", "2y", "max"],
+                         help="Zeitraum (Default: 5d)")
+
+    # prices
+    p_prices = sub.add_parser("prices", help="Gespeicherte Kursdaten anzeigen")
+    p_prices.add_argument("ticker", help="Ticker-Symbol")
+    p_prices.add_argument("--days", type=int, default=10, help="Anzahl Tage (Default: 10)")
+    p_prices.add_argument("--all", action="store_true", help="Alle gespeicherten Daten")
+
     # export
-    sub.add_parser("export", help="Formatierten Export f\u00fcr Claude-Chat")
+    sub.add_parser("export", help="Formatierten Export für Claude-Chat")
 
     args = parser.parse_args()
 
@@ -588,6 +785,9 @@ def main():
         "export": cmd_export,
         "transcribe": cmd_transcribe,
         "auto-ampel": cmd_auto_ampel,
+        "watchlist": cmd_watchlist,
+        "fetch": cmd_fetch,
+        "prices": cmd_prices,
     }
 
     commands[args.command](args)
