@@ -8,6 +8,11 @@ import os
 import re
 import sys
 from datetime import datetime
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from ampel_data import fetch_all_market_data, calculate_mechanical_signals
 
