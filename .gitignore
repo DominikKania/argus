@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 .mcp.json
 analysis_today.json
+logs/
+.env

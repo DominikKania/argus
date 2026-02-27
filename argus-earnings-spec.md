@@ -6,6 +6,69 @@ Systematische Earnings-Analyse für Einzelaktien. Getrennt von der Ampel:
 - **Ampel** = strategisch ("Soll ich investiert sein?") — Makro-Signalsystem für passive ETF-Allokation
 - **Earnings** = taktisch ("Welche Titel haben jetzt ein Setup?") — Einzelaktien-Analyse rund um Quartalszahlen
 
+## Ziel & Grundidee
+
+### Das Problem
+
+Börsennotierte Unternehmen müssen alle 3 Monate öffentlich berichten, wie viel sie verdient haben — die sogenannten Quartalszahlen (Earnings). Das passiert 4x pro Jahr und ist jedes Mal ein riesiges Event: An einem einzigen Tag kann eine Aktie 10-20% steigen oder fallen. Die meisten Anleger reagieren dabei rein emotional — sie lesen eine Schlagzeile und handeln impulsiv. Es gibt keinen systematischen Lernprozess.
+
+### Der Ansatz am konkreten Beispiel: NVIDIA
+
+NVIDIA meldet 4x im Jahr Quartalszahlen — immer Ende Februar, Mai, August und November, typischerweise nach US-Börsenschluss (ca. 22:00 Uhr deutscher Zeit). Nehmen wir die **Q4-Zahlen am 25. Februar 2026** als Beispiel für den kompletten Kreislauf: **Prognose → Beobachtung → Vergleich → Lernen.**
+
+**~17. Februar — Pre-Earnings Analyse**
+```bash
+python argus.py earnings NVDA
+```
+Etwa eine Woche vor dem Termin sammelst du alle verfügbaren Daten. Das System holt automatisch: Aktueller Kurs (128,50$), was Analysten erwarten (EPS 0,82$), ob NVIDIA die letzten Quartale die Erwartungen geschlagen hat (4/4 Beats), wie viel Kursbewegung der Markt erwartet (±8,5%). Optional recherchiert die KI die aktuelle Stimmung im Netz (Upgrades, Downgrades, Risikofaktoren).
+
+Dann gibst du deine begründete Einschätzung ab: Wird der Kurs steigen, fallen, oder seitwärts gehen? Mit welcher Überzeugung? Warum?
+> "Bullish, medium confidence — 4/4 Beats, starker Analysten-Konsens, aber AI-Capex-Sorgen als Risiko."
+
+Alles wird in der Datenbank gespeichert. Jetzt wartest du auf den Termin.
+
+**25. Februar, ~22:00 Uhr — Earnings werden veröffentlicht**
+NVIDIA meldet die Zahlen nach Börsenschluss. Du liest die Ergebnisse, schaust die Reaktion im Aftermarket. Hier machst du noch nichts im System — die Börse muss erst einen Tag mit den neuen Zahlen handeln.
+
+**26. Februar abends — Post-Earnings Analyse**
+```bash
+python argus.py earnings NVDA --post
+```
+Jetzt schaust du, was tatsächlich passiert ist. Das System holt die Ergebnisse: EPS 0,89$ (Beat! +8,5% über Erwartung) — aber der Kurs ist trotzdem gefallen. Eröffnung bei 118$ (Gap-Down -8,2%), Schluss bei 115$ (-10,5%).
+
+Das System erkennt automatisch technische Muster (Gap-Down + Bearish Engulfing + 3,5x Volume) und prüft die "Kindle Rule" — einen kombinierten Indikator der zeigt, ob die Kursbewegung nachhaltig ist. Dann der entscheidende Schritt: Deine Prognose wird mit der Realität verglichen (bullish → Kurs gefallen → **falsch**) und eine Lektion formuliert: "Gute Zahlen, aber die Guidance (Ausblick) war schwächer als erhofft. Der Markt reagiert nicht auf Vergangenheit sondern auf Zukunft."
+
+**Die Zeitlinie auf einen Blick:**
+```
+17. Feb           25. Feb (22:00)        26. Feb abends
+   |                   |                      |
+   ▼                   ▼                      ▼
+Pre-Analyse         NVIDIA meldet          Post-Analyse
+"Bullish,           EPS 0,89 (Beat!)       Kurs -10,5%
+medium"             Guidance schwach        Kindle: Bearish
+                                           Prognose: FALSCH ✘
+                                           Lektion gelernt ✓
+```
+
+**Mai 2026 — nächste NVIDIA-Earnings, Q1-Zahlen**
+Du hast jetzt einen Datenpunkt mehr. Du weißt: "Bei NVIDIA kann ein Beat trotzdem zum Kurseinbruch führen, wenn die Guidance enttäuscht." Das fließt in deine nächste Einschätzung ein.
+
+### Was du über Zeit gewinnst
+
+Nach 20-30 dokumentierten Earnings baut sich ein persönliches Wissensarchiv auf:
+
+- **Trefferquote:** "Ich lag in 65% der Fälle richtig" → objektives Feedback statt Bauchgefühl
+- **Mustererkennung:** "Wenn die IV deutlich über dem historischen Durchschnitt liegt, fällt der Kurs danach oft — selbst bei guten Zahlen" (weil zu viel Erwartung eingepreist war)
+- **Kindle Rule Validierung:** "Wenn Gap + Engulfing + Volume in eine Richtung zeigen, ging es in 80% der Fälle weiter in diese Richtung" → nutzbares Handelssignal
+- **Typische Fallen:** "Beat allein reicht nicht — der Markt reagiert auf die Guidance (Ausblick), nicht auf die vergangenen Zahlen"
+
+### Kernprinzip
+
+> **Nicht vorhersagen, sondern systematisch besser werden.**
+> Jede Earnings-Analyse ist ein Datenpunkt. Über Zeit entsteht aus vielen Datenpunkten echtes Wissen darüber, welche Signale tatsächlich funktionieren und welche nicht.
+
+Das Modul ist kein Trading-System das automatisch handelt. Es ist ein **Lern- und Analysewerkzeug**, das dich zwingt, deine Einschätzungen zu dokumentieren, mit der Realität abzugleichen und daraus zu lernen — statt dieselben Fehler immer wieder zu machen.
+
 ## Workflow
 
 ```
