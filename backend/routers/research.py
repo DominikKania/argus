@@ -108,6 +108,31 @@ Erstelle einen detaillierten Research-Prompt der folgende Aspekte abdeckt:
 - Der Prompt soll so formuliert sein, dass ein LLM damit eine fundierte Analyse erstellen kann
 - Antworte NUR mit dem Prompt-Text, kein JSON, kein Markdown-Wrapper"""
 
+REFINE_PROMPT_SYSTEM = """\
+Du bist ein Research-Prompt-Experte im Argus Investment-System. Der Benutzer hat einen \
+Research-Prompt mit einem Tutor besprochen. Basierend auf dem Gesprächsverlauf sollst du \
+den Prompt optimieren.
+
+## HEUTIGES DATUM
+{today}
+
+## PORTFOLIO-KONTEXT
+Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+
+## DEINE AUFGABE
+- Lies den Original-Prompt und den Gesprächsverlauf
+- Integriere alle Verbesserungsvorschläge, Wünsche und Feedback des Benutzers
+- Erstelle eine verbesserte Version des Research-Prompts
+- Behalte gute Aspekte des Originals bei, verbessere schwache Stellen
+- Stelle sicher, dass der Prompt spezifisch, detailliert und gut strukturiert ist
+
+## REGELN
+- Antworte NUR mit dem verbesserten Prompt-Text
+- Kein JSON, kein Markdown-Wrapper, keine Erklärungen
+- Der Prompt soll auf Deutsch sein
+- Beziehe immer den Portfolio-Kontext ein
+- Der Prompt soll so formuliert sein, dass ein LLM damit eine fundierte Analyse erstellen kann"""
+
 RESEARCH_SYSTEM_PROMPT = """\
 Du bist ein Deep-Research-Analyst im Argus Investment-System. Du führst tiefgehende Analysen \
 zu spezifischen Themen durch, die das Portfolio betreffen.
@@ -167,6 +192,12 @@ class UpdateResearchRequest(BaseModel):
 class GeneratePromptRequest(BaseModel):
     title: str
     direction: Optional[str] = None
+
+
+class RefinePromptRequest(BaseModel):
+    topic_title: str
+    original_prompt: str
+    chat_history: list[dict]
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
@@ -260,6 +291,29 @@ def generate_prompt(req: GeneratePromptRequest):
     except Exception as e:
         log.error("Prompt-Generierung fehlgeschlagen: %s", e)
         raise HTTPException(status_code=500, detail="Prompt-Generierung fehlgeschlagen.")
+
+
+@router.post("/refine-prompt")
+def refine_prompt(req: RefinePromptRequest):
+    """Refine a research prompt based on chat conversation."""
+    try:
+        # Build user message with original prompt + chat history
+        parts = [f"## Original-Prompt zum Thema: {req.topic_title}\n\n{req.original_prompt}"]
+        parts.append("\n## Gesprächsverlauf")
+        for msg in req.chat_history:
+            role = "Benutzer" if msg.get("role") == "user" else "Tutor"
+            parts.append(f"\n**{role}:** {msg.get('content', '')}")
+        parts.append("\n\nErstelle jetzt den verbesserten Prompt.")
+
+        system = REFINE_PROMPT_SYSTEM.format(today=datetime.now().strftime("%Y-%m-%d"))
+        refined = call_llm(
+            system,
+            [{"role": "user", "content": "\n".join(parts)}],
+        )
+        return {"prompt": refined}
+    except Exception as e:
+        log.error("Prompt-Verfeinerung fehlgeschlagen: %s", e)
+        raise HTTPException(status_code=500, detail="Prompt-Verfeinerung fehlgeschlagen.")
 
 
 @router.put("/{id_or_slug}")

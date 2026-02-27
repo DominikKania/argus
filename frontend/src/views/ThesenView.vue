@@ -32,9 +32,11 @@
         <div v-for="thesis in ampelStore.theses" :key="thesis._id" class="thesis-card">
           <div class="thesis-header">
             <p class="thesis-statement">{{ thesis.statement }}</p>
-            <button class="chat-trigger" v-tooltip.top="'Frag den Tutor'" @click="askAbout(thesis)">
-              <i class="pi pi-comments" />
-            </button>
+            <div class="thesis-actions">
+              <button class="chat-trigger" v-tooltip.top="'Besprechen & optimieren'" @click="reviewThesis(thesis)">
+                <i class="pi pi-comments" />
+              </button>
+            </div>
           </div>
 
           <div v-if="thesis.catalyst" class="catalyst">
@@ -76,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import { useAmpelStore } from '@/stores/ampelStore'
 import { useChatStore } from '@/stores/chatStore'
 import type { OpenThesis } from '@/types/ampel'
@@ -86,11 +88,48 @@ import Button from 'primevue/button'
 const ampelStore = useAmpelStore()
 const chatStore = useChatStore()
 
-function askAbout(thesis: OpenThesis) {
-  chatStore.openWithContext(
-    `Erkläre mir diese These: ${thesis.statement}${thesis.catalyst ? ' (Katalysator: ' + thesis.catalyst + ')' : ''}`
-  )
+function reviewThesis(thesis: OpenThesis) {
+  chatStore.openForThesisReview({
+    thesisId: thesis._id,
+    statement: thesis.statement,
+    thesis: {
+      statement: thesis.statement,
+      catalyst: thesis.catalyst || '',
+      catalyst_date: thesis.catalyst_date || '',
+      expected_if_positive: thesis.expected_if_positive || '',
+      expected_if_negative: thesis.expected_if_negative || '',
+    },
+  })
 }
+
+// Watch for refined thesis from chat
+watch(
+  () => chatStore.refinedThesis,
+  async (refined) => {
+    if (refined && chatStore.thesisReviewContext) {
+      const id = chatStore.thesisReviewContext.thesisId
+      const updated = await ampelStore.updateThesis(id, {
+        statement: refined.statement as string,
+        catalyst: refined.catalyst as string,
+        catalyst_date: refined.catalyst_date as string,
+        expected_if_positive: refined.expected_if_positive as string,
+        expected_if_negative: refined.expected_if_negative as string,
+      })
+      if (updated) {
+        // Update review context with new data
+        chatStore.thesisReviewContext.statement = updated.statement
+        chatStore.thesisReviewContext.thesis = {
+          statement: updated.statement,
+          catalyst: updated.catalyst || '',
+          catalyst_date: updated.catalyst_date || '',
+          expected_if_positive: updated.expected_if_positive || '',
+          expected_if_negative: updated.expected_if_negative || '',
+        }
+      }
+      chatStore.refinedThesis = null
+    }
+  },
+)
 
 const daysUntil = (dateStr: string): number => {
   const now = new Date()
@@ -169,6 +208,12 @@ onMounted(() => {
   flex: 1;
 }
 
+.thesis-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
 .chat-trigger {
   background: none;
   border: none;
@@ -179,7 +224,6 @@ onMounted(() => {
   opacity: 0;
   transition: all 0.15s;
   font-size: 0.875rem;
-  flex-shrink: 0;
 
   .thesis-card:hover & { opacity: 0.6; }
   &:hover { opacity: 1 !important; color: var(--p-primary-500); background: var(--p-surface-ground); }

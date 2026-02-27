@@ -23,6 +23,42 @@
     </template>
 
     <div class="chat-body" ref="chatBody">
+      <!-- Prompt Review Banner -->
+      <div v-if="chatStore.promptReviewContext" class="review-banner">
+        <div class="banner-header">
+          <i class="pi pi-file-edit" />
+          <span>Prompt besprechen</span>
+        </div>
+        <p class="banner-topic">{{ chatStore.promptReviewContext.topicTitle }}</p>
+        <Button
+          v-if="chatStore.messages.length >= 2"
+          label="Prompt aktualisieren"
+          icon="pi pi-sync"
+          size="small"
+          class="refine-btn"
+          :loading="refining"
+          @click="refinePrompt"
+        />
+      </div>
+
+      <!-- Thesis Review Banner -->
+      <div v-if="chatStore.thesisReviewContext" class="review-banner review-banner-thesis">
+        <div class="banner-header">
+          <i class="pi pi-bookmark" />
+          <span>These besprechen</span>
+        </div>
+        <p class="banner-topic">{{ chatStore.thesisReviewContext.statement }}</p>
+        <Button
+          v-if="chatStore.messages.length >= 2"
+          label="These aktualisieren"
+          icon="pi pi-sync"
+          size="small"
+          class="refine-btn"
+          :loading="refiningThesis"
+          @click="refineThesis"
+        />
+      </div>
+
       <!-- Welcome -->
       <div v-if="!chatStore.messages.length && !chatStore.isLoading" class="welcome">
         <div class="welcome-icon">
@@ -44,17 +80,22 @@
 
       <!-- Messages -->
       <template v-else>
-        <div
-          v-for="(msg, i) in chatStore.messages"
-          :key="i"
-          class="message"
-          :class="`message-${msg.role}`"
-        >
-          <div class="message-bubble">{{ msg.content }}</div>
-        </div>
+        <template v-for="(msg, i) in chatStore.messages" :key="i">
+          <!-- Skip empty assistant messages (streaming placeholder) -->
+          <div
+            v-if="msg.content || msg.role !== 'assistant'"
+            class="message"
+            :class="`message-${msg.role}`"
+          >
+            <div
+              class="message-bubble"
+              :class="{ streaming: chatStore.isLoading && msg.role === 'assistant' && i === chatStore.messages.length - 1 }"
+            >{{ msg.content }}</div>
+          </div>
+        </template>
 
-        <!-- Typing indicator -->
-        <div v-if="chatStore.isLoading" class="message message-assistant">
+        <!-- Typing indicator (only while waiting for first chunk) -->
+        <div v-if="chatStore.isLoading && (!lastMessage?.content || lastMessage.role !== 'assistant')" class="message message-assistant">
           <div class="message-bubble typing-bubble">
             <span class="typing-dot" />
             <span class="typing-dot" />
@@ -110,6 +151,49 @@ const route = useRoute()
 const inputText = ref('')
 const chatBody = ref<HTMLElement>()
 const inputEl = ref<HTMLTextAreaElement>()
+
+const lastMessage = computed(() =>
+  chatStore.messages.length ? chatStore.messages[chatStore.messages.length - 1] : null,
+)
+const refining = ref(false)
+const refiningThesis = ref(false)
+
+async function refineThesis() {
+  const ctx = chatStore.thesisReviewContext
+  if (!ctx || chatStore.messages.length < 2) return
+  refiningThesis.value = true
+  const refined = await ampelStore.refineThesis(
+    ctx.thesis,
+    chatStore.messages.map(m => ({ role: m.role, content: m.content })),
+  )
+  refiningThesis.value = false
+  if (refined) {
+    chatStore.refinedThesis = refined
+    chatStore.messages.push({
+      role: 'assistant',
+      content: 'These wurde aktualisiert und übernommen.',
+    })
+  }
+}
+
+async function refinePrompt() {
+  const ctx = chatStore.promptReviewContext
+  if (!ctx || chatStore.messages.length < 2) return
+  refining.value = true
+  const refined = await researchStore.refinePrompt(
+    ctx.topicTitle,
+    ctx.prompt,
+    chatStore.messages.map(m => ({ role: m.role, content: m.content })),
+  )
+  refining.value = false
+  if (refined) {
+    chatStore.refinedPrompt = refined
+    chatStore.messages.push({
+      role: 'assistant',
+      content: 'Prompt wurde aktualisiert und in den Editor übernommen.',
+    })
+  }
+}
 
 // Track current view
 watch(() => route.name, (name) => {
@@ -305,6 +389,11 @@ function scrollToBottom() {
 
 watch(() => chatStore.messages.length, scrollToBottom)
 watch(() => chatStore.isLoading, scrollToBottom)
+// Scroll during streaming as content builds up
+watch(
+  () => lastMessage.value?.content,
+  () => { if (chatStore.isLoading) scrollToBottom() },
+)
 watch(() => chatStore.isOpen, (open) => {
   if (open) {
     nextTick(() => inputEl.value?.focus())
@@ -358,6 +447,46 @@ watch(() => chatStore.isOpen, (open) => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+// Review Banner
+.review-banner {
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: 10px;
+  background: rgba(var(--p-primary-500-rgb, 99, 102, 241), 0.08);
+  border: 1px solid rgba(var(--p-primary-500-rgb, 99, 102, 241), 0.2);
+  flex-shrink: 0;
+
+  &.review-banner-thesis {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.2);
+
+    .banner-header { color: #f59e0b; }
+  }
+}
+
+.banner-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--p-primary-500);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.banner-topic {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--p-text-color);
+  margin: 0.375rem 0 0 0;
+}
+
+.refine-btn {
+  margin-top: 0.5rem;
+  width: 100%;
 }
 
 // Welcome
@@ -463,6 +592,19 @@ watch(() => chatStore.isOpen, (open) => {
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+
+  &.streaming::after {
+    content: '▊';
+    display: inline;
+    animation: blink-cursor 0.8s step-end infinite;
+    color: var(--p-primary-500);
+    font-weight: 200;
+  }
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 // Typing indicator

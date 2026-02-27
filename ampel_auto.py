@@ -138,6 +138,21 @@ Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6
 - 0.7-1.2 = neutral
 - Konträr-Indikator: Extreme deuten oft auf Wendepunkt hin
 
+### EUR/USD Wechselkurs
+- EUR-Stärke (rising) kann europäische Exporte belasten, aber EUR-Assets aufwerten
+- USD-Stärke (falling) = oft Risk-Off Signal, da USD als Safe Haven fungiert
+- Starke USD-Aufwertung (>3% in 1M) kann EM-Märkte und multinationale US-Unternehmen belasten
+- IWDA ist USD-denominiert (Acc) — Währungsbewegung beeinflusst EUR-Anleger direkt
+- Berücksichtige dies bei der Kontext-Bewertung von Makro und Trend
+
+### Credit Spread (HYG vs LQD)
+- Spread-Proxy: HYG-Performance minus LQD-Performance über 1 Monat
+- Positiv (narrowing) = Risk-On, High Yield outperformt = Risikobereitschaft hoch
+- Negativ (widening) = Risk-Off, Investment Grade outperformt = Flucht in Qualität
+- Starkes Widening (>2pp) ist frühes Warnsignal für breitere Marktschwäche
+- Credit Spreads sind oft Frühindikator — sie weiten sich VOR Aktienmarktkorrekturen
+- Berücksichtige dies bei der Kontext-Bewertung von Makro und Sentiment
+
 ### Marktbreite (aus deinem Wissen)
 - Bewerte A/D-Line, New Highs/Lows basierend auf aktuellen Berichten
 - Divergenz (Index steigt, Marktbreite sinkt) ist klassisches Warnsignal
@@ -181,11 +196,11 @@ Verwende exakt dieses Schema:
     "detail": "..."
   },
   "thesis": {
-    "statement": "...",
-    "catalyst": "...",
+    "statement": "Klarer Satz in einfachem Deutsch, ohne Fachkürzel oder Gesetzesbezeichnungen",
+    "catalyst": "Was genau muss passieren? In einfachen Worten",
     "catalyst_date": "YYYY-MM-DD",
-    "expected_if_positive": "...",
-    "expected_if_negative": "..."
+    "expected_if_positive": "Was passiert für mein ETF wenn die These eintritt?",
+    "expected_if_negative": "Was passiert für mein ETF wenn die These nicht eintritt?"
   },
   "escalation_trigger": "...",
   "crash_rule_active": false,
@@ -194,22 +209,29 @@ Verwende exakt dieses Schema:
     "regional_note": "...",
     "seasonality_note": "...",
     "breadth_note": "...",
-    "put_call_note": "..."
+    "put_call_note": "...",
+    "currency_note": "...",
+    "credit_spread_note": "..."
   }
 }
 
 REGELN:
 - Alle Texte auf Deutsch, kurz und prägnant
+- VERSTÄNDLICHKEIT: Schreibe für einen interessierten Laien. KEINE Fachkürzel, Paragraphen-Nummern \
+oder Gesetzesbezeichnungen (NICHT "Section 122", "IEEPA", "Art. 122 AEUV", "FOMC" etc.). \
+Stattdessen in einfachen Worten erklären (z.B. "US-Notfallzölle" statt "Section-122-Zölle", \
+"US-Notenbank-Sitzung" statt "FOMC-Meeting")
 - Enum-Werte exakt wie angegeben (lowercase)
 - Zahlen ohne Einheiten
 - sentiment_events enthält genau 3 Einträge
 - beller_check.triggered=false und Felder auf null wenn Ampel GRÜN
 - thesis darf null sein wenn keine neue These sinnvoll ist
+- thesis: Statement, Katalysator und Szenarien müssen ohne Vorwissen verständlich sein
 - market_context: Kurze Notizen zu erweiterten Marktdaten, nur ausfüllen wenn relevant
 """
 
 
-def build_user_prompt(market, mech_signals, mech_score, history, theses, researches=None):
+def build_user_prompt(market, mech_signals, mech_score, history, theses, researches=None, news_results=None):
     """Baut den User-Prompt mit aktuellen Daten zusammen."""
     vix = market["vix"]
     yld = market["yields"]
@@ -267,6 +289,25 @@ def build_user_prompt(market, mech_signals, mech_score, history, theses, researc
         lines.append("## PUT/CALL RATIO (SPY, nächster Verfall)")
         lines.append(f"- Put OI: {pc['put_oi']:,} | Call OI: {pc['call_oi']:,}")
         lines.append(f"- Ratio: {pc['ratio']:.2f} ({pc['signal']})")
+
+    # EUR/USD
+    eur = market.get("eurusd")
+    if eur:
+        dir_label = "EUR stärker" if eur["direction"] == "rising" else "USD stärker" if eur["direction"] == "falling" else "stabil"
+        lines.append("")
+        lines.append("## EUR/USD WECHSELKURS")
+        lines.append(f"- Kurs: {eur['rate']:.4f}")
+        lines.append(f"- 1-Monats-Veränderung: {eur['change_1m_pct']:+.2f}%")
+        lines.append(f"- Richtung: {eur['direction']} ({dir_label})")
+
+    # Credit Spread
+    cs = market.get("credit_spread")
+    if cs:
+        lines.append("")
+        lines.append("## CREDIT SPREAD (HYG vs LQD, 1-Monats-Performance)")
+        lines.append(f"- HYG (High Yield): {cs['hyg_price']}$ ({cs['hyg_perf_1m']:+.2f}%)")
+        lines.append(f"- LQD (Inv. Grade): {cs['lqd_price']}$ ({cs['lqd_perf_1m']:+.2f}%)")
+        lines.append(f"- Spread-Proxy (HYG-LQD Perf.): {cs['spread_proxy']:+.2f}pp ({cs['direction']})")
 
     # Zusätzlicher Kontext (LLM-Wissen)
     lines.append("")
@@ -330,16 +371,43 @@ def build_user_prompt(market, mech_signals, mech_score, history, theses, researc
             summary = r.get("relevance_summary") or "Keine Zusammenfassung verfügbar"
             lines.append(f"- **{r['title']}**: {summary}")
 
+    # News-Kontext (heute via RSS)
+    if news_results:
+        lines.append("")
+        lines.append("## NEWS-KONTEXT (heute via RSS-Feeds)")
+        lines.append("Folgende tagesaktuelle News-Analysen liegen vor:")
+        for nr in news_results:
+            trend = nr.get("trend", "stable")
+            summary = nr.get("summary", "Keine Zusammenfassung")
+            topic_title = nr.get("title") or nr.get("topic", "?")
+            lines.append(f"- **{topic_title}** ({trend}): {summary}")
+            triggers = nr.get("triggers_detected", [])
+            if triggers:
+                lines.append(f"  Trigger: {', '.join(triggers)}")
+            relevance = nr.get("ampel_relevance", "")
+            if relevance:
+                lines.append(f"  Ampel-Relevanz: {relevance}")
+
     return "\n".join(lines)
 
 
 # ── Claude API Aufruf ────────────────────────────────────────────────────
 
-def call_llm(system_prompt, user_prompt):
-    """Ruft das konfigurierte LLM auf und gibt die Textantwort zurück."""
+def call_llm(system_prompt, user_prompt, temperature=None):
+    """Ruft das konfigurierte LLM auf und gibt die Textantwort zurück.
+
+    Args:
+        system_prompt: System-Prompt
+        user_prompt: User-Prompt
+        temperature: Optional, 0.0 für deterministische Antworten
+    """
     provider_type, client, model = get_llm_client()
 
-    log.info("LLM-Aufruf: provider=%s, model=%s", provider_type, model)
+    log.info("LLM-Aufruf: provider=%s, model=%s, temperature=%s", provider_type, model, temperature)
+
+    extra = {}
+    if temperature is not None:
+        extra["temperature"] = temperature
 
     if provider_type == "anthropic":
         response = client.messages.create(
@@ -347,6 +415,7 @@ def call_llm(system_prompt, user_prompt):
             max_tokens=4096,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
+            **extra,
         )
         return response.content[0].text
 
@@ -358,6 +427,7 @@ def call_llm(system_prompt, user_prompt):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            **extra,
         )
         return response.choices[0].message.content
 
@@ -545,17 +615,33 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
     # 2. Mechanische Signale berechnen
     mech_signals, mech_score = calculate_mechanical_signals(market)
 
-    # 3. Verlauf + Thesen + Researches aus DB laden
+    # 3. News automatisch sammeln wenn aktive Topics existieren
+    active_news = db.news_topics.count_documents({"active": True})
+    if active_news > 0:
+        print(f"Sammle News für {active_news} aktive Topics...")
+        try:
+            from news import run_all_news_topics
+            news_count = run_all_news_topics(db)
+            if news_count:
+                log.info("%d News-Topics aktualisiert", news_count)
+        except Exception as e:
+            log.warning("News-Sammlung fehlgeschlagen: %s", e)
+
+    # 4. Verlauf + Thesen + Researches + News aus DB laden
     history = list(db.analyses.find(sort=[("date", -1)]).limit(5))
     theses = list(db.theses.find({"status": "open"}).sort("created_date", -1))
     researches = list(db.researches.find(
         {"status": "completed", "relevance_summary": {"$ne": None}},
         {"results": 0},
     ))
+    news_results = list(db.news_results.find(
+        {"date": date_str},
+        {"raw_headlines": 0},
+    ))
 
-    # 4. Claude API aufrufen
+    # 5. Claude API aufrufen
     print("Rufe LLM für Kontextanalyse auf...")
-    user_prompt = build_user_prompt(market, mech_signals, mech_score, history, theses, researches)
+    user_prompt = build_user_prompt(market, mech_signals, mech_score, history, theses, researches, news_results)
     llm_text = call_llm(SYSTEM_PROMPT, user_prompt)
 
     # 5. JSON parsen

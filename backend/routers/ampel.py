@@ -1,9 +1,74 @@
 """Ampel API routes."""
 
-from fastapi import APIRouter
+import json
+import logging
+from datetime import datetime
+from typing import Optional
+
+from bson import ObjectId
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
 from ..db import get_db
+from ..llm import call_llm
+
+log = logging.getLogger("argus")
 
 router = APIRouter()
+
+
+# ── Models ────────────────────────────────────────────────────────────────
+
+class UpdateThesisRequest(BaseModel):
+    statement: Optional[str] = None
+    catalyst: Optional[str] = None
+    catalyst_date: Optional[str] = None
+    expected_if_positive: Optional[str] = None
+    expected_if_negative: Optional[str] = None
+
+
+class RefineThesisRequest(BaseModel):
+    thesis: dict
+    chat_history: list[dict]
+
+
+# ── System Prompts ────────────────────────────────────────────────────────
+
+REFINE_THESIS_SYSTEM = """\
+Du bist ein Investment-Analyst im Argus Investment-System. Der Benutzer hat eine \
+Investment-These mit einem Tutor besprochen. Basierend auf dem Gesprächsverlauf sollst du \
+die These optimieren.
+
+## HEUTIGES DATUM
+{today}
+
+## PORTFOLIO-KONTEXT
+Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+
+## DEINE AUFGABE
+- Lies die Original-These und den Gesprächsverlauf
+- Integriere alle Verbesserungsvorschläge, Wünsche und Feedback des Benutzers
+- Erstelle eine verbesserte Version der These
+- Behalte gute Aspekte des Originals bei, verbessere schwache Stellen
+- Stelle sicher, dass die These spezifisch, testbar und relevant für das Portfolio ist
+
+## SPRACHE & VERSTÄNDLICHKEIT
+- Schreibe ALLE Texte in klarem, einfachem Deutsch — wie für einen interessierten Laien
+- KEINE Fachkürzel, Paragraphen-Nummern oder Gesetzesbezeichnungen (NICHT "Section 122", "IEEPA", "Art. 122 AEUV" etc.)
+- Stattdessen das Konzept in einfachen Worten erklären (z.B. "US-Notfallzölle" statt "Section-122-Zölle")
+- Kurze, klare Sätze. Jeder Satz muss ohne Vorwissen verständlich sein
+- Konkrete Auswirkungen beschreiben, nicht abstrakte Mechanismen
+
+## REGELN
+- Antworte NUR mit einem JSON-Objekt (kein Markdown, kein Text drumherum)
+- Das JSON hat exakt diese Felder:
+  - "statement": Die Kernaussage der These — ein klarer, verständlicher Satz
+  - "catalyst": Was genau muss passieren? In einfachen Worten
+  - "catalyst_date": Datum im Format YYYY-MM-DD (oder null) — MUSS in der Zukunft liegen!
+  - "expected_if_positive": Was passiert für mein Portfolio wenn die These eintritt?
+  - "expected_if_negative": Was passiert für mein Portfolio wenn die These nicht eintritt?
+- Die These muss testbar und zeitlich eingrenzbar sein
+- WICHTIG: Alle Daten müssen im aktuellen Jahr ({year}) oder später liegen!"""
 
 
 def _serialize_doc(doc):
@@ -35,3 +100,78 @@ def get_theses():
     db = get_db()
     cursor = db.theses.find({"status": "open"}).sort("created_date", -1)
     return [_serialize_doc(doc) for doc in cursor]
+
+
+@router.put("/theses/{thesis_id}")
+def update_thesis(thesis_id: str, req: UpdateThesisRequest):
+    """Update an open thesis."""
+    db = get_db()
+    try:
+        oid = ObjectId(thesis_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Ungültige Thesis-ID.")
+
+    doc = db.theses.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="These nicht gefunden.")
+
+    update = {}
+    for field in ("statement", "catalyst", "catalyst_date", "expected_if_positive", "expected_if_negative"):
+        val = getattr(req, field, None)
+        if val is not None:
+            update[field] = val
+
+    if not update:
+        raise HTTPException(status_code=400, detail="Keine Änderungen angegeben.")
+
+    db.theses.update_one({"_id": oid}, {"$set": update})
+    updated = db.theses.find_one({"_id": oid})
+    return _serialize_doc(updated)
+
+
+@router.post("/theses/refine")
+def refine_thesis(req: RefineThesisRequest):
+    """Refine a thesis based on chat conversation."""
+    try:
+        parts = [
+            "## Original-These",
+            f"**Statement:** {req.thesis.get('statement', '')}",
+        ]
+        if req.thesis.get("catalyst"):
+            parts.append(f"**Katalysator:** {req.thesis['catalyst']}")
+        if req.thesis.get("catalyst_date"):
+            parts.append(f"**Katalysator-Datum:** {req.thesis['catalyst_date']}")
+        if req.thesis.get("expected_if_positive"):
+            parts.append(f"**Wenn positiv:** {req.thesis['expected_if_positive']}")
+        if req.thesis.get("expected_if_negative"):
+            parts.append(f"**Wenn negativ:** {req.thesis['expected_if_negative']}")
+
+        parts.append("\n## Gesprächsverlauf")
+        for msg in req.chat_history:
+            role = "Benutzer" if msg.get("role") == "user" else "Tutor"
+            parts.append(f"\n**{role}:** {msg.get('content', '')}")
+        parts.append("\n\nErstelle jetzt die verbesserte These als JSON.")
+
+        now = datetime.now()
+        system = REFINE_THESIS_SYSTEM.format(today=now.strftime("%Y-%m-%d"), year=now.year)
+        result = call_llm(
+            system,
+            [{"role": "user", "content": "\n".join(parts)}],
+        )
+
+        # Parse JSON from response (strip markdown fences if present)
+        cleaned = result.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+
+        thesis_data = json.loads(cleaned)
+        return {"thesis": thesis_data}
+    except json.JSONDecodeError as e:
+        log.error("Thesis-Verfeinerung JSON-Parse-Fehler: %s\nAntwort: %s", e, result)
+        raise HTTPException(status_code=500, detail="LLM-Antwort konnte nicht als JSON geparst werden.")
+    except Exception as e:
+        log.error("Thesis-Verfeinerung fehlgeschlagen: %s", e)
+        raise HTTPException(status_code=500, detail="Thesis-Verfeinerung fehlgeschlagen.")

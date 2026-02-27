@@ -2,11 +2,11 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { API_ENDPOINTS } from '@/config/apiEndpoints'
 import { ApiService } from '@/services/apiService'
-import type { Research } from '@/types/research'
+import type { NewsTopic } from '@/types/news'
 
-export const useResearchStore = defineStore('research', () => {
-  const topics = ref<Research[]>([])
-  const selectedTopic = ref<Research | null>(null)
+export const useNewsStore = defineStore('news', () => {
+  const topics = ref<NewsTopic[]>([])
+  const selectedTopic = ref<NewsTopic | null>(null)
   const loading = ref(false)
   const running = ref(false)
   const error = ref<string | null>(null)
@@ -15,9 +15,9 @@ export const useResearchStore = defineStore('research', () => {
     loading.value = true
     error.value = null
     try {
-      topics.value = await ApiService.get<Research[]>(API_ENDPOINTS.RESEARCH.LIST)
+      topics.value = await ApiService.get<NewsTopic[]>(API_ENDPOINTS.NEWS.LIST)
     } catch (err) {
-      error.value = 'Fehler beim Laden der Research-Themen'
+      error.value = 'Fehler beim Laden der News-Themen'
       console.error(err)
     } finally {
       loading.value = false
@@ -28,7 +28,7 @@ export const useResearchStore = defineStore('research', () => {
     loading.value = true
     error.value = null
     try {
-      selectedTopic.value = await ApiService.get<Research>(API_ENDPOINTS.RESEARCH.DETAIL(id))
+      selectedTopic.value = await ApiService.get<NewsTopic>(API_ENDPOINTS.NEWS.DETAIL(id))
     } catch (err) {
       error.value = 'Fehler beim Laden des Topics'
       console.error(err)
@@ -37,14 +37,20 @@ export const useResearchStore = defineStore('research', () => {
     }
   }
 
-  async function createTopic(title: string, prompt?: string, direction?: string): Promise<Research | null> {
+  async function createTopic(
+    title: string,
+    prompt?: string,
+    direction?: string,
+    rssFeeds?: Array<{ name: string; url: string }>,
+  ): Promise<NewsTopic | null> {
     loading.value = true
     error.value = null
     try {
-      const created = await ApiService.post<Research>(API_ENDPOINTS.RESEARCH.CREATE, {
+      const created = await ApiService.post<NewsTopic>(API_ENDPOINTS.NEWS.CREATE, {
         title,
         prompt: prompt || undefined,
         direction: direction || undefined,
+        rss_feeds: rssFeeds || undefined,
       })
       topics.value.unshift(created)
       selectedTopic.value = created
@@ -58,10 +64,10 @@ export const useResearchStore = defineStore('research', () => {
     }
   }
 
-  async function updateTopic(id: string, data: { title?: string; prompt?: string }) {
+  async function updateTopic(id: string, data: { title?: string; prompt?: string; active?: boolean; rss_feeds?: Array<{ name: string; url: string }> }) {
     error.value = null
     try {
-      const updated = await ApiService.put<Research>(API_ENDPOINTS.RESEARCH.UPDATE(id), data)
+      const updated = await ApiService.put<NewsTopic>(API_ENDPOINTS.NEWS.UPDATE(id), data)
       const idx = topics.value.findIndex((t) => t._id === id)
       if (idx >= 0) topics.value[idx] = updated
       if (selectedTopic.value?._id === id) selectedTopic.value = updated
@@ -73,26 +79,43 @@ export const useResearchStore = defineStore('research', () => {
     }
   }
 
-  async function runResearch(id: string) {
+  async function toggleActive(id: string) {
+    const topic = topics.value.find((t) => t._id === id)
+    if (!topic) return null
+    return updateTopic(id, { active: !topic.active })
+  }
+
+  async function runTopic(id: string) {
     running.value = true
     error.value = null
-    // Optimistic: mark as running
-    if (selectedTopic.value?._id === id) {
-      selectedTopic.value = { ...selectedTopic.value, status: 'running', error_message: null }
-    }
-    const idx = topics.value.findIndex((t) => t._id === id)
-    if (idx >= 0) {
-      topics.value[idx] = { ...topics.value[idx], status: 'running', error_message: null }
-    }
     try {
-      const updated = await ApiService.post<Research>(API_ENDPOINTS.RESEARCH.RUN(id), {})
-      if (idx >= 0) topics.value[idx] = updated
-      if (selectedTopic.value?._id === id) selectedTopic.value = updated
-      return updated
-    } catch (err: any) {
-      error.value = err?.response?.data?.detail || 'Research fehlgeschlagen'
-      // Refresh to get actual state
+      const result = await ApiService.post<any>(API_ENDPOINTS.NEWS.RUN(id), {})
+      // Refresh topic to get latest result
       await fetchTopic(id)
+      // Also update list entry
+      const idx = topics.value.findIndex((t) => t._id === id)
+      if (idx >= 0 && selectedTopic.value) {
+        topics.value[idx] = selectedTopic.value
+      }
+      return result
+    } catch (err: any) {
+      error.value = err?.response?.data?.detail || 'News-Analyse fehlgeschlagen'
+      console.error(err)
+      return null
+    } finally {
+      running.value = false
+    }
+  }
+
+  async function runAll() {
+    running.value = true
+    error.value = null
+    try {
+      const result = await ApiService.post<{ topics_analyzed: number }>(API_ENDPOINTS.NEWS.RUN_ALL, {})
+      await fetchTopics()
+      return result
+    } catch (err: any) {
+      error.value = err?.response?.data?.detail || 'News-Analyse fehlgeschlagen'
       console.error(err)
       return null
     } finally {
@@ -103,7 +126,7 @@ export const useResearchStore = defineStore('research', () => {
   async function deleteTopic(id: string) {
     error.value = null
     try {
-      await ApiService.delete(API_ENDPOINTS.RESEARCH.DELETE(id))
+      await ApiService.delete(API_ENDPOINTS.NEWS.DELETE(id))
       topics.value = topics.value.filter((t) => t._id !== id)
       if (selectedTopic.value?._id === id) {
         selectedTopic.value = topics.value[0] || null
@@ -119,7 +142,7 @@ export const useResearchStore = defineStore('research', () => {
   async function generatePrompt(title: string, direction?: string): Promise<string | null> {
     try {
       const res = await ApiService.post<{ prompt: string }>(
-        API_ENDPOINTS.RESEARCH.GENERATE_PROMPT,
+        API_ENDPOINTS.NEWS.GENERATE_PROMPT,
         { title, direction: direction || undefined },
       )
       return res.prompt
@@ -136,7 +159,7 @@ export const useResearchStore = defineStore('research', () => {
   ): Promise<string | null> {
     try {
       const res = await ApiService.post<{ prompt: string }>(
-        API_ENDPOINTS.RESEARCH.REFINE_PROMPT,
+        API_ENDPOINTS.NEWS.REFINE_PROMPT,
         { topic_title: topicTitle, original_prompt: originalPrompt, chat_history: chatHistory },
       )
       return res.prompt
@@ -156,7 +179,9 @@ export const useResearchStore = defineStore('research', () => {
     fetchTopic,
     createTopic,
     updateTopic,
-    runResearch,
+    toggleActive,
+    runTopic,
+    runAll,
     deleteTopic,
     generatePrompt,
     refinePrompt,

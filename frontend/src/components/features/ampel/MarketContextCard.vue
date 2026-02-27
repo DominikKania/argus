@@ -52,6 +52,8 @@ const NOTE_CONFIG: Record<string, { label: string; icon: string }> = {
   put_call_note: { label: 'Put/Call Ratio', icon: 'pi pi-chart-bar' },
   breadth_note: { label: 'Marktbreite', icon: 'pi pi-th-large' },
   seasonality_note: { label: 'Saisonalität', icon: 'pi pi-calendar' },
+  currency_note: { label: 'EUR/USD Wechselkurs', icon: 'pi pi-dollar' },
+  credit_spread_note: { label: 'Credit Spread (HY)', icon: 'pi pi-chart-line' },
 }
 
 const contextItems = computed(() => {

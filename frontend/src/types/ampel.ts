@@ -43,12 +43,29 @@ export interface PutCallRatio {
   signal: 'bullish' | 'neutral' | 'bearish'
 }
 
+export interface EurUsd {
+  rate: number
+  change_1m_pct: number
+  direction: 'rising' | 'falling' | 'flat'
+}
+
+export interface CreditSpread {
+  hyg_price: number
+  lqd_price: number
+  hyg_perf_1m: number
+  lqd_perf_1m: number
+  spread_proxy: number
+  direction: 'widening' | 'narrowing' | 'flat'
+}
+
 export interface MarketContext {
   sector_rotation_note?: string
   regional_note?: string
   seasonality_note?: string
   breadth_note?: string
   put_call_note?: string
+  currency_note?: string
+  credit_spread_note?: string
 }
 
 export interface MarketData {
@@ -65,6 +82,8 @@ export interface MarketData {
   regional?: RegionalComparison | null
   seasonality?: Seasonality | null
   put_call?: PutCallRatio | null
+  eurusd?: EurUsd | null
+  credit_spread?: CreditSpread | null
 }
 
 export type SignalColor = 'green' | 'yellow' | 'red'

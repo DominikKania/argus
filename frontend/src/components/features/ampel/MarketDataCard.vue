@@ -162,6 +162,46 @@
             </span>
           </div>
         </template>
+        <!-- EUR/USD -->
+        <template v-if="market.eurusd">
+          <div class="data-row">
+            <span class="data-label">EUR/USD</span>
+            <span class="data-value">
+              {{ market.eurusd.rate.toFixed(4) }}
+              <i :class="directionIcon(market.eurusd.direction)" class="direction-arrow" />
+            </span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">EUR/USD 1M</span>
+            <span class="data-value" :class="market.eurusd.change_1m_pct < -2 ? 'value-warn' : ''">
+              {{ formatSigned(market.eurusd.change_1m_pct) }}%
+            </span>
+          </div>
+        </template>
+        <!-- Credit Spread -->
+        <template v-if="market.credit_spread">
+          <div class="data-row">
+            <span class="data-label">Credit Spread</span>
+            <span class="data-value" :class="creditSpreadClass">
+              {{ formatSigned(market.credit_spread.spread_proxy) }}pp
+              <i :class="creditSpreadIcon" class="direction-arrow" />
+            </span>
+          </div>
+          <div class="sector-details">
+            <div class="sector-item">
+              <span class="sector-name">HYG (High Yield)</span>
+              <span class="sector-perf" :class="market.credit_spread.hyg_perf_1m >= 0 ? 'perf-pos' : 'perf-neg'">
+                {{ formatSigned(market.credit_spread.hyg_perf_1m) }}%
+              </span>
+            </div>
+            <div class="sector-item">
+              <span class="sector-name">LQD (Inv. Grade)</span>
+              <span class="sector-perf" :class="market.credit_spread.lqd_perf_1m >= 0 ? 'perf-pos' : 'perf-neg'">
+                {{ formatSigned(market.credit_spread.lqd_perf_1m) }}%
+              </span>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -185,7 +225,8 @@ function askAbout() {
 }
 
 const hasExtendedData = computed(() =>
-  !!(props.market.sector_rotation || props.market.regional || props.market.put_call || props.market.seasonality)
+  !!(props.market.sector_rotation || props.market.regional || props.market.put_call
+     || props.market.seasonality || props.market.eurusd || props.market.credit_spread)
 )
 
 const vixClass = computed(() => {
@@ -200,6 +241,22 @@ const riskOnClass = computed(() => {
   if (val > 3) return 'value-good'
   if (val < -3) return 'value-warn'
   return ''
+})
+
+const creditSpreadClass = computed(() => {
+  const val = props.market.credit_spread?.spread_proxy
+  if (val == null) return ''
+  if (val > 1) return 'value-good'      // narrowing = risk-on
+  if (val < -1) return 'value-warn'     // widening = risk-off
+  return ''
+})
+
+// Credit Spread: widening = schlecht (rot/runter), narrowing = gut (grün/rauf)
+const creditSpreadIcon = computed(() => {
+  const dir = props.market.credit_spread?.direction
+  if (dir === 'narrowing') return 'pi pi-arrow-up'
+  if (dir === 'widening') return 'pi pi-arrow-down'
+  return 'pi pi-minus'
 })
 
 const directionIcon = (dir: string) => {

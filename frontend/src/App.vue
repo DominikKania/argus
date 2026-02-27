@@ -72,6 +72,12 @@ createNavigation({
       to: '/research',
       active: route.path.startsWith('/research'),
     },
+    {
+      label: 'News',
+      icon: 'pi pi-megaphone',
+      to: '/news',
+      active: route.path.startsWith('/news'),
+    },
   ],
 })
 </script>

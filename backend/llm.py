@@ -45,6 +45,42 @@ def get_llm_client():
         return "openai", OpenAI(**kwargs), model
 
 
+def stream_llm(system_prompt: str, messages: list[dict]):
+    """Generator that yields text chunks from the configured LLM.
+
+    Args:
+        system_prompt: The system prompt string.
+        messages: List of {"role": "user"|"assistant", "content": "..."} dicts.
+
+    Yields:
+        Text chunks as they arrive from the LLM.
+    """
+    provider_type, client, model = get_llm_client()
+    log.info("LLM-Stream: provider=%s, model=%s", provider_type, model)
+
+    if provider_type == "anthropic":
+        with client.messages.stream(
+            model=model,
+            max_tokens=2048,
+            system=system_prompt,
+            messages=messages,
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+    else:
+        openai_messages = [{"role": "system", "content": system_prompt}] + messages
+        stream = client.chat.completions.create(
+            model=model,
+            max_tokens=2048,
+            messages=openai_messages,
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                yield delta.content
+
+
 def call_llm(system_prompt: str, messages: list[dict]) -> str:
     """Calls the configured LLM with a system prompt and message history.
 

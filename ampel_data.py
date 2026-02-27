@@ -32,6 +32,13 @@ SECTOR_TICKERS = {
 SPY_TICKER = "SPY"    # S&P 500
 EZU_TICKER = "EZU"    # iShares MSCI Eurozone
 
+# Währung
+EURUSD_TICKER = "EURUSD=X"
+
+# Credit Spread ETFs (HY vs IG als Proxy)
+HYG_TICKER = "HYG"   # iShares iBoxx High Yield Corporate Bond ETF
+LQD_TICKER = "LQD"   # iShares iBoxx Investment Grade Corporate Bond ETF
+
 
 # ── Daten holen ──────────────────────────────────────────────────────────
 
@@ -372,6 +379,97 @@ def fetch_put_call_ratio():
         return None
 
 
+def fetch_eurusd():
+    """Holt EUR/USD Kurs, 1-Monats-Veränderung und Richtung.
+
+    Returns:
+        dict mit rate, change_1m_pct, direction — oder None bei Fehler.
+    """
+    try:
+        t = yf.Ticker(EURUSD_TICKER)
+        hist = t.history(period="1mo")
+        if hist.empty or len(hist) < 2:
+            log.warning("EUR/USD: keine Daten")
+            return None
+
+        close = hist["Close"]
+        rate = round(float(close.iloc[-1]), 4)
+        rate_1m_ago = round(float(close.iloc[0]), 4)
+        change_1m_pct = round(((rate - rate_1m_ago) / rate_1m_ago) * 100, 2)
+
+        # Richtung bestimmen (Schwelle 0.5%)
+        if change_1m_pct > 0.5:
+            direction = "rising"    # EUR stärker
+        elif change_1m_pct < -0.5:
+            direction = "falling"   # USD stärker
+        else:
+            direction = "flat"
+
+        log.info("EUR/USD: %.4f (1M: %+.2f%%, %s)", rate, change_1m_pct, direction)
+        return {
+            "rate": rate,
+            "change_1m_pct": change_1m_pct,
+            "direction": direction,
+        }
+    except Exception as e:
+        log.warning("EUR/USD fehlgeschlagen: %s", e)
+        return None
+
+
+def fetch_credit_spread():
+    """Berechnet Credit Spread Proxy aus HYG vs LQD Performance.
+
+    HYG (High Yield) vs LQD (Investment Grade): Wenn HYG relativ
+    zu LQD fällt, weiten sich Credit Spreads = Risk-Off.
+
+    Returns:
+        dict mit hyg_price, lqd_price, hyg_perf_1m, lqd_perf_1m,
+              spread_proxy, direction — oder None bei Fehler.
+    """
+    try:
+        hyg_data = {}
+        lqd_data = {}
+
+        for label, ticker_sym, target in [("HYG", HYG_TICKER, hyg_data),
+                                           ("LQD", LQD_TICKER, lqd_data)]:
+            t = yf.Ticker(ticker_sym)
+            hist = t.history(period="1mo")
+            if hist.empty or len(hist) < 2:
+                log.warning("Credit Spread %s: keine Daten", label)
+                return None
+            close = hist["Close"]
+            target["price"] = round(float(close.iloc[-1]), 2)
+            target["perf_1m"] = round(
+                ((float(close.iloc[-1]) - float(close.iloc[0])) / float(close.iloc[0])) * 100, 2
+            )
+
+        # Spread-Proxy: HYG perf - LQD perf
+        # Positiv = HY outperformt IG = Credit Spreads engen ein = Risk-On
+        # Negativ = HY underperformt IG = Credit Spreads weiten sich = Risk-Off
+        spread_proxy = round(hyg_data["perf_1m"] - lqd_data["perf_1m"], 2)
+
+        if spread_proxy > 0.5:
+            direction = "narrowing"   # Risk-On
+        elif spread_proxy < -0.5:
+            direction = "widening"    # Risk-Off
+        else:
+            direction = "flat"
+
+        log.info("Credit Spread: HYG %+.2f%% LQD %+.2f%%, Proxy: %+.2f%% (%s)",
+                 hyg_data["perf_1m"], lqd_data["perf_1m"], spread_proxy, direction)
+        return {
+            "hyg_price": hyg_data["price"],
+            "lqd_price": lqd_data["price"],
+            "hyg_perf_1m": hyg_data["perf_1m"],
+            "lqd_perf_1m": lqd_data["perf_1m"],
+            "spread_proxy": spread_proxy,
+            "direction": direction,
+        }
+    except Exception as e:
+        log.warning("Credit Spread fehlgeschlagen: %s", e)
+        return None
+
+
 def fetch_all_market_data(db, cpi_override=None):
     """Holt alle Marktdaten und gibt das vollständige market-Dict zurück."""
     # Core-Daten (sequentiell — kritisch)
@@ -381,12 +479,14 @@ def fetch_all_market_data(db, cpi_override=None):
 
     # Erweiterte Daten (parallel — alle optional)
     extended = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {
             executor.submit(fetch_sector_rotation): "sector_rotation",
             executor.submit(fetch_regional_comparison): "regional",
             executor.submit(fetch_seasonality): "seasonality",
             executor.submit(fetch_put_call_ratio): "put_call",
+            executor.submit(fetch_eurusd): "eurusd",
+            executor.submit(fetch_credit_spread): "credit_spread",
         }
         for future in as_completed(futures):
             key = futures[future]

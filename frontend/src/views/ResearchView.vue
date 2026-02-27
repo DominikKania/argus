@@ -310,10 +310,25 @@ async function deleteSelected() {
 function chatAboutPrompt() {
   if (!researchStore.selectedTopic || !editablePrompt.value.trim()) return
   const t = researchStore.selectedTopic
-  chatStore.openWithContext(
-    `Ich möchte meinen Research-Prompt verbessern. Überprüfe ihn und gib mir konkretes Feedback — was fehlt, was ist zu vage, was könnte schärfer formuliert sein?\n\n**Thema:** ${t.title}\n\n**Aktueller Prompt:**\n${editablePrompt.value}`
-  )
+  chatStore.openForPromptReview({
+    topicId: t._id,
+    topicTitle: t.title,
+    prompt: editablePrompt.value,
+  })
 }
+
+// Watch for refined prompt from chat
+watch(
+  () => chatStore.refinedPrompt,
+  (refined) => {
+    if (refined && chatStore.promptReviewContext) {
+      editablePrompt.value = refined
+      // Update the review context with new prompt
+      chatStore.promptReviewContext.prompt = refined
+      chatStore.refinedPrompt = null
+    }
+  },
+)
 
 function askAbout() {
   if (!researchStore.selectedTopic) return

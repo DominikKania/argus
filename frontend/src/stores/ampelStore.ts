@@ -71,6 +71,34 @@ export const useAmpelStore = defineStore('ampel', () => {
     theses.value = await ApiService.get<OpenThesis[]>(API_ENDPOINTS.AMPEL.THESES)
   }
 
+  async function updateThesis(id: string, data: Partial<OpenThesis>): Promise<OpenThesis | null> {
+    try {
+      const updated = await ApiService.put<OpenThesis>(API_ENDPOINTS.AMPEL.UPDATE_THESIS(id), data)
+      const idx = theses.value.findIndex((t) => t._id === id)
+      if (idx >= 0) theses.value[idx] = updated
+      return updated
+    } catch (err) {
+      console.error(err)
+      return null
+    }
+  }
+
+  async function refineThesis(
+    thesis: Record<string, unknown>,
+    chatHistory: Array<{ role: string; content: string }>,
+  ): Promise<Record<string, unknown> | null> {
+    try {
+      const res = await ApiService.post<{ thesis: Record<string, unknown> }>(
+        API_ENDPOINTS.AMPEL.REFINE_THESIS,
+        { thesis, chat_history: chatHistory },
+      )
+      return res.thesis
+    } catch (err) {
+      console.error(err)
+      return null
+    }
+  }
+
   return {
     latestAnalysis,
     history,
@@ -81,5 +109,7 @@ export const useAmpelStore = defineStore('ampel', () => {
     fetchHistory,
     fetchTheses,
     fetchDashboard,
+    updateThesis,
+    refineThesis,
   }
 })

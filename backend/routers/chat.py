@@ -2,12 +2,14 @@
 
 import json
 import logging
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..db import get_db
-from ..llm import call_llm
+from ..llm import call_llm, stream_llm
 
 log = logging.getLogger("argus")
 
@@ -16,6 +18,9 @@ router = APIRouter()
 CHAT_SYSTEM_PROMPT = """\
 Du bist ein freundlicher Trading-Tutor im Argus Investment-System. Der Benutzer ist ein \
 Privatanleger mit einem MSCI World ETF (IWDA, ~6.700€).
+
+## HEUTIGES DATUM
+{today}
 
 ## DEINE ROLLE
 - Erkläre Finanz- und Börsenbegriffe einfach und verständlich
@@ -42,6 +47,9 @@ Der Benutzer schaut sich gerade den Bereich "{view}" an.
 class ChatContext(BaseModel):
     view: str = "dashboard"
     ticker: Optional[str] = None
+    prompt_review: Optional[str] = None
+    prompt_topic: Optional[str] = None
+    thesis_review: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -147,7 +155,34 @@ def chat(req: ChatRequest):
     view = req.context.view
     extra_context = _build_extra_context(db, view, req.context.ticker)
 
+    # Add thesis review context if present
+    if req.context.thesis_review:
+        extra_context += (
+            f"\n\n## THESEN-REVIEW MODUS"
+            f"\nDer Benutzer bespricht gerade eine Investment-These und möchte sie verbessern."
+            f"\n**These:** {req.context.thesis_review}"
+            f"\n\nHilf dem Benutzer die These zu verbessern. Achte besonders auf:"
+            f"\n- **Verständlichkeit:** Keine Fachkürzel (Section 122, IEEPA etc.) — alles in einfachem Deutsch"
+            f"\n- **Testbarkeit:** Ist klar wann die These eingetreten oder widerlegt ist?"
+            f"\n- **Konkretheit:** Sind die Szenarien greifbar?"
+            f"\n- **Zeitrahmen:** Liegt das Katalysator-Datum in der Zukunft?"
+        )
+
+    # Add prompt review context if present
+    if req.context.prompt_review:
+        topic_name = req.context.prompt_topic or "Unbekannt"
+        extra_context += (
+            f"\n\n## PROMPT-REVIEW MODUS"
+            f"\nDer Benutzer bespricht gerade einen Research-Prompt und möchte ihn verbessern."
+            f"\n**Thema:** {topic_name}"
+            f"\n**Aktueller Prompt:**\n{req.context.prompt_review}"
+            f"\n\nHilf dem Benutzer den Prompt zu verbessern. Gib konkretes Feedback: "
+            f"Was fehlt? Was ist zu vage? Was könnte schärfer formuliert sein? "
+            f"Schlage Verbesserungen vor."
+        )
+
     system_prompt = CHAT_SYSTEM_PROMPT.format(
+        today=datetime.now().strftime("%Y-%m-%d"),
         view=view,
         analysis_json=analysis_json,
         extra_context=extra_context,
@@ -168,3 +203,70 @@ def chat(req: ChatRequest):
             status_code=500,
             detail="LLM-Aufruf fehlgeschlagen. Bitte versuche es erneut.",
         )
+
+
+@router.post("/stream")
+def chat_stream(req: ChatRequest):
+    """Stream a chat response via Server-Sent Events."""
+    db = get_db()
+    analysis = db.analyses.find_one(sort=[("date", -1)])
+
+    if analysis:
+        analysis.pop("_id", None)
+        analysis.pop("simplified", None)
+        analysis_json = json.dumps(analysis, ensure_ascii=False, indent=2, default=str)
+    else:
+        analysis_json = "Keine Analyse vorhanden."
+
+    view = req.context.view
+    extra_context = _build_extra_context(db, view, req.context.ticker)
+
+    if req.context.thesis_review:
+        extra_context += (
+            f"\n\n## THESEN-REVIEW MODUS"
+            f"\nDer Benutzer bespricht gerade eine Investment-These und möchte sie verbessern."
+            f"\n**These:** {req.context.thesis_review}"
+            f"\n\nHilf dem Benutzer die These zu verbessern. Achte besonders auf:"
+            f"\n- **Verständlichkeit:** Keine Fachkürzel (Section 122, IEEPA etc.) — alles in einfachem Deutsch"
+            f"\n- **Testbarkeit:** Ist klar wann die These eingetreten oder widerlegt ist?"
+            f"\n- **Konkretheit:** Sind die Szenarien greifbar?"
+            f"\n- **Zeitrahmen:** Liegt das Katalysator-Datum in der Zukunft?"
+        )
+
+    if req.context.prompt_review:
+        topic_name = req.context.prompt_topic or "Unbekannt"
+        extra_context += (
+            f"\n\n## PROMPT-REVIEW MODUS"
+            f"\nDer Benutzer bespricht gerade einen Research-Prompt und möchte ihn verbessern."
+            f"\n**Thema:** {topic_name}"
+            f"\n**Aktueller Prompt:**\n{req.context.prompt_review}"
+            f"\n\nHilf dem Benutzer den Prompt zu verbessern. Gib konkretes Feedback: "
+            f"Was fehlt? Was ist zu vage? Was könnte schärfer formuliert sein? "
+            f"Schlage Verbesserungen vor."
+        )
+
+    system_prompt = CHAT_SYSTEM_PROMPT.format(
+        today=datetime.now().strftime("%Y-%m-%d"),
+        view=view,
+        analysis_json=analysis_json,
+        extra_context=extra_context,
+    )
+
+    llm_messages = []
+    for msg in req.history:
+        if msg.get("role") in ("user", "assistant") and msg.get("content"):
+            llm_messages.append({"role": msg["role"], "content": msg["content"]})
+    llm_messages.append({"role": "user", "content": req.message})
+
+    def generate():
+        try:
+            for chunk in stream_llm(system_prompt, llm_messages):
+                escaped = json.dumps(chunk, ensure_ascii=False)
+                yield f"data: {escaped}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            log.error("Chat stream failed: %s", e)
+            error_msg = json.dumps({"error": str(e)}, ensure_ascii=False)
+            yield f"data: {error_msg}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")

@@ -77,6 +77,10 @@ def ensure_indexes(db):
     db.watchlist.create_index([("ticker", ASCENDING)], unique=True)
     db.researches.create_index([("topic", ASCENDING)], unique=True)
     db.researches.create_index([("status", ASCENDING)])
+    db.news_topics.create_index([("topic", ASCENDING)], unique=True)
+    db.news_topics.create_index([("active", ASCENDING)])
+    db.news_results.create_index([("topic", ASCENDING), ("date", ASCENDING)], unique=True)
+    db.news_results.create_index([("date", ASCENDING)])
 
     # IWDA.AS als Default-Eintrag
     db.watchlist.update_one(
