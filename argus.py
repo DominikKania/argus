@@ -806,6 +806,45 @@ def print_analysis_detail(doc):
     print(f"    US10Y: {y.get('us10y', '?')}  |  US2Y: {y.get('us2y', '?')}  |  Spread: {y.get('spread', '?')} ({y.get('spread_direction', '?')})")
     print(f"    Real Yield: {y.get('real_yield', '?')}  |  CPI: {y.get('cpi', '?')}")
 
+    # Erweiterte Marktdaten
+    sr = m.get("sector_rotation")
+    if sr and sr.get("sectors"):
+        print(f"\n  Sektor-Rotation (1M):")
+        for name, data in sr["sectors"].items():
+            print(f"    {name.replace('_', ' ').title()}: {data['perf_1m']:+.2f}%")
+        if sr.get("risk_on_vs_off") is not None:
+            print(f"    Risk-On vs. Defensive: {sr['risk_on_vs_off']:+.2f}pp")
+
+    reg = m.get("regional")
+    if reg:
+        parts = []
+        if reg.get("spy_perf_1m") is not None:
+            parts.append(f"USA: {reg['spy_perf_1m']:+.2f}%")
+        if reg.get("ezu_perf_1m") is not None:
+            parts.append(f"Europa: {reg['ezu_perf_1m']:+.2f}%")
+        if parts:
+            print(f"  Regional (1M): {' | '.join(parts)}")
+        if reg.get("usa_vs_europe") is not None:
+            print(f"    USA vs Europa: {reg['usa_vs_europe']:+.2f}pp")
+
+    pc = m.get("put_call")
+    if pc:
+        print(f"    Put/Call: {pc['ratio']:.2f} ({pc['signal']})")
+
+    seas = m.get("seasonality")
+    if seas:
+        print(f"    Saisonalität: avg {seas['avg_return_pct']:+.2f}% ({seas['seasonal_bias']})")
+
+    # LLM Market Context
+    mctx = doc.get("market_context")
+    if mctx:
+        notes = [(k.replace("_note", "").replace("_", " ").title(), v)
+                 for k, v in mctx.items() if v]
+        if notes:
+            print(f"\n  Markt-Kontext:")
+            for label, note in notes:
+                print(f"    {label}: {note}")
+
     print(f"\n  Signale:")
     for name in SIGNAL_NAMES:
         sig = signals[name]

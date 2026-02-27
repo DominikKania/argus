@@ -114,6 +114,35 @@ Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6
 - RED: 0-1/4 mit mehreren Warnungen
 - RED_CAPITULATION: 0/4 mit Panik-Indikatoren
 
+## ERWEITERTE MARKTDATEN
+
+### Sektor-Rotation
+- Risk-On vs. Defensive Spread > 0 = offensiver Markt (Tech, Financials, Industrials führen)
+- Risk-On vs. Defensive Spread < 0 = defensiver Markt (Healthcare, Utilities, Consumer Staples führen)
+- Extreme Divergenz (>5pp) kann Überhitzung oder Panik signalisieren
+- Berücksichtige dies bei der Kontext-Bewertung von Trend und Sentiment
+
+### Regionaler Vergleich (Europa vs USA)
+- IWDA hat ~70% US-Gewichtung — US-Schwäche trifft stärker als Europa-Schwäche
+- Divergenz USA/Europa kann auf regionsspezifische Risiken hinweisen
+- Beide schwach = breite globale Schwäche → ernstes Signal
+
+### Saisonalität
+- Historische Muster sind KEIN Signal allein, nur Kontext
+- Bekanntester Effekt: "Sell in May", Jahresendrally (Nov-Jan), Oktober-Schwäche
+- Wenn saisonaler Bias mit anderen Signalen übereinstimmt → stärkt die These
+
+### Put/Call Ratio
+- >1.2 = hohe Angst (konträr: kann Kaufsignal sein wenn andere Signale grün)
+- <0.7 = hohe Gier/Euphorie (Warnsignal für mögliche Korrektur)
+- 0.7-1.2 = neutral
+- Konträr-Indikator: Extreme deuten oft auf Wendepunkt hin
+
+### Marktbreite (aus deinem Wissen)
+- Bewerte A/D-Line, New Highs/Lows basierend auf aktuellen Berichten
+- Divergenz (Index steigt, Marktbreite sinkt) ist klassisches Warnsignal
+- ETF-Flows und Margin Debt: Erwähne wenn bedeutsam, ignoriere wenn unklar
+
 ## CRASH-REGEL
 Bei VIX >35 UND Kurs >10% unter SMA200 → kein aktiver Re-Entry
 
@@ -159,7 +188,14 @@ Verwende exakt dieses Schema:
     "expected_if_negative": "..."
   },
   "escalation_trigger": "...",
-  "crash_rule_active": false
+  "crash_rule_active": false,
+  "market_context": {
+    "sector_rotation_note": "...",
+    "regional_note": "...",
+    "seasonality_note": "...",
+    "breadth_note": "...",
+    "put_call_note": "..."
+  }
 }
 
 REGELN:
@@ -169,6 +205,7 @@ REGELN:
 - sentiment_events enthält genau 3 Einträge
 - beller_check.triggered=false und Felder auf null wenn Ampel GRÜN
 - thesis darf null sein wenn keine neue These sinnvoll ist
+- market_context: Kurze Notizen zu erweiterten Marktdaten, nur ausfüllen wenn relevant
 """
 
 
@@ -188,6 +225,59 @@ def build_user_prompt(market, mech_signals, mech_score, history, theses, researc
         f"- VIX: {vix['value']} (Vorwoche: {vix['prev_week']}, Richtung: {vix['direction']})",
         f"- US 10Y: {yld['us10y']}% | US 2Y: {yld['us2y']}% | Spread: {yld['spread']}% ({yld['spread_direction']})",
         f"- CPI: {yld['cpi']}% | Real Yield: {yld['real_yield']}%",
+    ]
+
+    # Sektor-Rotation
+    sr = market.get("sector_rotation")
+    if sr and sr.get("sectors"):
+        lines.append("")
+        lines.append("## SEKTOR-ROTATION (1-Monats-Performance, Sektor-ETFs)")
+        for name, data in sr["sectors"].items():
+            lines.append(f"- {name.replace('_', ' ').title()}: {data['perf_1m']:+.2f}% ({data['ticker']})")
+        if sr.get("risk_on_vs_off") is not None:
+            lines.append(f"- Risk-On vs. Defensive Spread: {sr['risk_on_vs_off']:+.2f}pp")
+
+    # Regionaler Vergleich
+    reg = market.get("regional")
+    if reg:
+        lines.append("")
+        lines.append("## REGIONALER VERGLEICH (1 Monat)")
+        if reg.get("spy_perf_1m") is not None:
+            lines.append(f"- USA (SPY): {reg['spy_perf_1m']:+.2f}%")
+        if reg.get("ezu_perf_1m") is not None:
+            lines.append(f"- Europa (EZU): {reg['ezu_perf_1m']:+.2f}%")
+        if reg.get("usa_vs_europe") is not None:
+            lines.append(f"- USA vs. Europa Differenz: {reg['usa_vs_europe']:+.2f}pp")
+
+    # Saisonalität
+    seas = market.get("seasonality")
+    if seas:
+        month_names = {1: "Jan", 2: "Feb", 3: "Mär", 4: "Apr", 5: "Mai", 6: "Jun",
+                       7: "Jul", 8: "Aug", 9: "Sep", 10: "Okt", 11: "Nov", 12: "Dez"}
+        m = seas["current_month"]
+        lines.append("")
+        lines.append("## SAISONALITÄT (IWDA historisch)")
+        lines.append(f"- Aktueller Monat ({month_names.get(m, m)}): avg. {seas['avg_return_pct']:+.2f}%")
+        lines.append(f"- Saisonaler Bias: {seas['seasonal_bias']}")
+
+    # Put/Call Ratio
+    pc = market.get("put_call")
+    if pc:
+        lines.append("")
+        lines.append("## PUT/CALL RATIO (SPY, nächster Verfall)")
+        lines.append(f"- Put OI: {pc['put_oi']:,} | Call OI: {pc['call_oi']:,}")
+        lines.append(f"- Ratio: {pc['ratio']:.2f} ({pc['signal']})")
+
+    # Zusätzlicher Kontext (LLM-Wissen)
+    lines.append("")
+    lines.append("## ZUSÄTZLICHER KONTEXT (aus deinem Marktwissen)")
+    lines.append("Bewerte folgende Punkte basierend auf deinem aktuellen Wissen:")
+    lines.append("- Advance/Decline-Line: Ist die Marktbreite gesund oder divergiert sie vom Index?")
+    lines.append("- New Highs vs. New Lows: Gibt es Anzeichen für breite Schwäche?")
+    lines.append("- ETF-Flows (MSCI World / IWDA): Gibt es Anzeichen für Zu- oder Abflüsse?")
+    lines.append("- Margin Debt: Gibt es Berichte über erhöhte oder fallende Margin-Schulden?")
+
+    lines.extend([
         "",
         "## MECHANISCHE SIGNALE (berechnet)",
         f"- Trend: {mech_signals['trend']} (Kurs {'über' if market['price'] > market['sma50'] else 'unter'} SMA50)",
@@ -195,7 +285,7 @@ def build_user_prompt(market, mech_signals, mech_score, history, theses, researc
         f"- Makro: {mech_signals['macro']} (Spread {yld['spread']}%)",
         f"- Sentiment: noch zu bewerten",
         f"- Mechanischer Score: {mech_score}/4 (ohne Sentiment)",
-    ]
+    ])
 
     # Verlauf
     if history:
@@ -420,6 +510,7 @@ def merge_analysis(date_str, market, mech_signals, mech_score, llm_data):
         "thesis": llm_data.get("thesis"),
         "escalation_trigger": llm_data.get("escalation_trigger"),
         "crash_rule_active": llm_data.get("crash_rule_active", False),
+        "market_context": llm_data.get("market_context"),
     }
 
     return analysis

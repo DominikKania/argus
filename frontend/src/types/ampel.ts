@@ -13,6 +13,44 @@ export interface YieldsData {
   cpi: number
 }
 
+export interface SectorData {
+  perf_1m: number
+  ticker: string
+}
+
+export interface SectorRotation {
+  sectors: Record<string, SectorData>
+  risk_on_vs_off: number | null
+}
+
+export interface RegionalComparison {
+  spy_perf_1m: number | null
+  ezu_perf_1m: number | null
+  usa_vs_europe: number | null
+}
+
+export interface Seasonality {
+  current_month: number
+  avg_return_pct: number
+  monthly_returns: Record<string, number>
+  seasonal_bias: 'bullish' | 'bearish' | 'neutral'
+}
+
+export interface PutCallRatio {
+  put_oi: number
+  call_oi: number
+  ratio: number
+  signal: 'bullish' | 'neutral' | 'bearish'
+}
+
+export interface MarketContext {
+  sector_rotation_note?: string
+  regional_note?: string
+  seasonality_note?: string
+  breadth_note?: string
+  put_call_note?: string
+}
+
 export interface MarketData {
   price: number
   sma50: number
@@ -23,6 +61,10 @@ export interface MarketData {
   golden_cross: boolean
   vix: VixData
   yields: YieldsData
+  sector_rotation?: SectorRotation | null
+  regional?: RegionalComparison | null
+  seasonality?: Seasonality | null
+  put_call?: PutCallRatio | null
 }
 
 export type SignalColor = 'green' | 'yellow' | 'red'
@@ -108,6 +150,7 @@ export interface Analysis {
   thesis?: Thesis
   escalation_trigger?: string
   crash_rule_active?: boolean
+  market_context?: MarketContext | null
   simplified?: SimplifiedTexts
 }
 

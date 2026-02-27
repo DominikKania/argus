@@ -86,6 +86,83 @@
           <span class="data-value">{{ market.yields.cpi.toFixed(1) }}%</span>
         </div>
       </div>
+
+      <!-- Erweiterte Daten -->
+      <div class="data-column" v-if="hasExtendedData">
+        <h4 class="column-title">Erweitert</h4>
+        <!-- Sector Rotation -->
+        <template v-if="market.sector_rotation">
+          <div class="data-row">
+            <span class="data-label">Risk-On/Off</span>
+            <span class="data-value" :class="riskOnClass">
+              {{ market.sector_rotation.risk_on_vs_off != null
+                 ? formatSigned(market.sector_rotation.risk_on_vs_off) + 'pp'
+                 : '-' }}
+            </span>
+          </div>
+          <div class="sector-details">
+            <div
+              v-for="(data, name) in market.sector_rotation.sectors"
+              :key="name"
+              class="sector-item"
+            >
+              <span class="sector-name">{{ formatSectorName(name as string) }}</span>
+              <span class="sector-perf" :class="data.perf_1m >= 0 ? 'perf-pos' : 'perf-neg'">
+                {{ formatSigned(data.perf_1m) }}%
+              </span>
+            </div>
+          </div>
+        </template>
+        <!-- Regional -->
+        <template v-if="market.regional">
+          <div class="data-row">
+            <span class="data-label">USA vs EUR</span>
+            <span class="data-value">
+              {{ market.regional.usa_vs_europe != null
+                 ? formatSigned(market.regional.usa_vs_europe) + 'pp'
+                 : '-' }}
+            </span>
+          </div>
+          <div class="sector-details">
+            <div class="sector-item" v-if="market.regional.spy_perf_1m != null">
+              <span class="sector-name">USA (SPY)</span>
+              <span class="sector-perf" :class="market.regional.spy_perf_1m >= 0 ? 'perf-pos' : 'perf-neg'">
+                {{ formatSigned(market.regional.spy_perf_1m) }}%
+              </span>
+            </div>
+            <div class="sector-item" v-if="market.regional.ezu_perf_1m != null">
+              <span class="sector-name">Europa (EZU)</span>
+              <span class="sector-perf" :class="market.regional.ezu_perf_1m >= 0 ? 'perf-pos' : 'perf-neg'">
+                {{ formatSigned(market.regional.ezu_perf_1m) }}%
+              </span>
+            </div>
+          </div>
+        </template>
+        <!-- Put/Call -->
+        <template v-if="market.put_call">
+          <div class="data-row">
+            <span class="data-label">Put/Call</span>
+            <span class="data-value">
+              {{ market.put_call.ratio.toFixed(2) }}
+              <span class="signal-badge" :class="'signal-' + market.put_call.signal">
+                {{ market.put_call.signal }}
+              </span>
+            </span>
+          </div>
+        </template>
+        <!-- Seasonality -->
+        <template v-if="market.seasonality">
+          <div class="data-row">
+            <span class="data-label">Saisonalität</span>
+            <span class="data-value">
+              {{ formatSigned(market.seasonality.avg_return_pct) }}%
+              <span class="signal-badge" :class="'signal-' + market.seasonality.seasonal_bias">
+                {{ market.seasonality.seasonal_bias }}
+              </span>
+            </span>
+          </div>
+        </template>
+      </div>
     </div>
   </div>
 </template>
@@ -107,9 +184,21 @@ function askAbout() {
   )
 }
 
+const hasExtendedData = computed(() =>
+  !!(props.market.sector_rotation || props.market.regional || props.market.put_call || props.market.seasonality)
+)
+
 const vixClass = computed(() => {
   if (props.market.vix.value > 30) return 'value-bad'
   if (props.market.vix.value > 25) return 'value-warn'
+  return ''
+})
+
+const riskOnClass = computed(() => {
+  const val = props.market.sector_rotation?.risk_on_vs_off
+  if (val == null) return ''
+  if (val > 3) return 'value-good'
+  if (val < -3) return 'value-warn'
   return ''
 })
 
@@ -117,6 +206,15 @@ const directionIcon = (dir: string) => {
   if (dir === 'rising' || dir === 'widening') return 'pi pi-arrow-up'
   if (dir === 'falling' || dir === 'narrowing') return 'pi pi-arrow-down'
   return 'pi pi-minus'
+}
+
+const formatSigned = (val: number) => {
+  const fixed = val.toFixed(1)
+  return val > 0 ? '+' + fixed : fixed
+}
+
+const formatSectorName = (name: string) => {
+  return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 </script>
 
@@ -160,9 +258,12 @@ const directionIcon = (dir: string) => {
 
 .data-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 2rem;
 
+  @media screen and (max-width: 960px) {
+    grid-template-columns: 1fr 1fr;
+  }
   @media screen and (max-width: 640px) {
     grid-template-columns: 1fr;
     gap: 1.5rem;
@@ -231,6 +332,56 @@ const directionIcon = (dir: string) => {
     background-color: rgba(239, 68, 68, 0.12);
     color: #dc2626;
     :root.dark & { background-color: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+  }
+}
+
+.value-good { color: #059669; :root.dark & { color: #6ee7b7; } }
+
+.sector-details {
+  padding: 0.25rem 0;
+}
+
+.sector-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.125rem 0;
+  font-size: 0.75rem;
+}
+
+.sector-name {
+  color: var(--p-text-color-secondary);
+}
+
+.sector-perf {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.perf-pos { color: #059669; :root.dark & { color: #6ee7b7; } }
+.perf-neg { color: #ef4444; :root.dark & { color: #fca5a5; } }
+
+.signal-badge {
+  font-size: 0.6875rem;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: capitalize;
+
+  &.signal-bullish {
+    background-color: rgba(16, 185, 129, 0.12);
+    color: #059669;
+    :root.dark & { background-color: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
+  }
+  &.signal-bearish {
+    background-color: rgba(239, 68, 68, 0.12);
+    color: #dc2626;
+    :root.dark & { background-color: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+  }
+  &.signal-neutral {
+    background-color: rgba(107, 114, 128, 0.12);
+    color: #6b7280;
+    :root.dark & { background-color: rgba(107, 114, 128, 0.2); color: #d1d5db; }
   }
 }
 </style>

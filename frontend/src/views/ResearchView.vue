@@ -16,7 +16,7 @@
           Deep Research
           <span v-if="researchStore.topics.length" class="count-badge">{{ researchStore.topics.length }}</span>
         </h1>
-        <Button label="Neues Thema" icon="pi pi-plus" size="small" @click="showNewDialog = true" />
+        <Button label="Neues Thema" icon="pi pi-plus" size="small" @click="showNewDialog = true; createError = ''" />
       </div>
 
       <div class="master-detail">
@@ -164,9 +164,13 @@
           @keydown.enter="createNewTopic"
         />
         <small class="form-hint">Ein KI-Prompt wird automatisch generiert.</small>
+        <div v-if="createError" class="create-error">
+          <i class="pi pi-exclamation-circle" />
+          {{ createError }}
+        </div>
       </div>
       <template #footer>
-        <Button label="Abbrechen" severity="secondary" text @click="showNewDialog = false" :disabled="creating" />
+        <Button label="Abbrechen" severity="secondary" text @click="closeNewDialog" :disabled="creating" />
         <Button label="Erstellen" icon="pi pi-plus" :loading="creating" :disabled="!newTitle.trim()" @click="createNewTopic" />
       </template>
     </Dialog>
@@ -190,6 +194,7 @@ const chatStore = useChatStore()
 const showNewDialog = ref(false)
 const newTitle = ref('')
 const creating = ref(false)
+const createError = ref('')
 const generatingPrompt = ref(false)
 const editablePrompt = ref('')
 
@@ -228,14 +233,22 @@ function selectTopic(topic: Research) {
   researchStore.fetchTopic(topic._id)
 }
 
+function closeNewDialog() {
+  showNewDialog.value = false
+  newTitle.value = ''
+  createError.value = ''
+}
+
 async function createNewTopic() {
   if (!newTitle.value.trim()) return
   creating.value = true
+  createError.value = ''
   const created = await researchStore.createTopic(newTitle.value.trim())
   creating.value = false
   if (created) {
-    showNewDialog.value = false
-    newTitle.value = ''
+    closeNewDialog()
+  } else {
+    createError.value = researchStore.error || 'Fehler beim Erstellen'
   }
 }
 
@@ -674,6 +687,22 @@ onMounted(() => {
 .form-hint {
   font-size: 0.75rem;
   color: var(--p-text-color-secondary);
+}
+
+.create-error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  font-size: 0.8125rem;
+
+  :root.dark & {
+    background: rgba(239, 68, 68, 0.12);
+    color: #fca5a5;
+  }
 }
 
 .w-full { width: 100%; }

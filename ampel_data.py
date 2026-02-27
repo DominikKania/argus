@@ -2,7 +2,9 @@
 """Ampel-Datensammlung via yfinance + mechanische Signalberechnung."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from typing import Optional
 
 import yfinance as yf
 
@@ -14,6 +16,21 @@ IWDA_TICKER = "IWDA.AS"   # iShares MSCI World, Euronext Amsterdam (EUR)
 VIX_TICKER = "^VIX"
 US10Y_TICKER = "^TNX"     # CBOE 10-Year Treasury Note Yield
 US2Y_TICKER = "2YY=F"     # 2-Year Treasury Yield Future (Fallback nötig)
+
+# Sektor-ETFs (US) für Rotationsanalyse
+SECTOR_TICKERS = {
+    "tech": "XLK",
+    "healthcare": "XLV",
+    "consumer_staples": "XLP",
+    "utilities": "XLU",
+    "financials": "XLF",
+    "industrials": "XLI",
+    "energy": "XLE",
+}
+
+# Regionale Vergleichs-ETFs
+SPY_TICKER = "SPY"    # S&P 500
+EZU_TICKER = "EZU"    # iShares MSCI Eurozone
 
 
 # ── Daten holen ──────────────────────────────────────────────────────────
@@ -181,16 +198,209 @@ def _get_last_value(db, field_path):
     return obj
 
 
+def fetch_sector_rotation():
+    """Holt 1-Monats-Performance der Sektor-ETFs für Rotationsanalyse.
+
+    Returns:
+        dict mit sectors, risk_on_vs_off — oder None bei Fehler.
+    """
+    sectors = {}
+    offensive_perfs = []
+    defensive_perfs = []
+
+    for name, ticker_sym in SECTOR_TICKERS.items():
+        try:
+            t = yf.Ticker(ticker_sym)
+            hist = t.history(period="1mo")
+            if hist.empty or len(hist) < 2:
+                log.warning("Sektor %s (%s): keine Daten", name, ticker_sym)
+                continue
+            close = hist["Close"]
+            perf = round(((float(close.iloc[-1]) - float(close.iloc[0])) / float(close.iloc[0])) * 100, 2)
+            sectors[name] = {"perf_1m": perf, "ticker": ticker_sym}
+
+            if name in ("tech", "financials", "industrials", "energy"):
+                offensive_perfs.append(perf)
+            elif name in ("healthcare", "consumer_staples", "utilities"):
+                defensive_perfs.append(perf)
+        except Exception as e:
+            log.warning("Sektor %s (%s) fehlgeschlagen: %s", name, ticker_sym, e)
+
+    risk_on_vs_off = None  # type: Optional[float]
+    if offensive_perfs and defensive_perfs:
+        avg_off = sum(offensive_perfs) / len(offensive_perfs)
+        avg_def = sum(defensive_perfs) / len(defensive_perfs)
+        risk_on_vs_off = round(avg_off - avg_def, 2)
+
+    log.info("Sektoren: %d geladen, Risk-On vs Off: %s", len(sectors), risk_on_vs_off)
+    return {"sectors": sectors, "risk_on_vs_off": risk_on_vs_off}
+
+
+def fetch_regional_comparison():
+    """Vergleicht Europa (EZU) vs USA (SPY) Performance über 1 Monat.
+
+    Returns:
+        dict mit spy_perf_1m, ezu_perf_1m, usa_vs_europe — oder None bei Fehler.
+    """
+    result = {}
+
+    for label, ticker_sym in [("spy", SPY_TICKER), ("ezu", EZU_TICKER)]:
+        try:
+            t = yf.Ticker(ticker_sym)
+            hist = t.history(period="1mo")
+            if hist.empty or len(hist) < 2:
+                log.warning("Regional %s: keine Daten", ticker_sym)
+                result[label + "_perf_1m"] = None
+                continue
+            close = hist["Close"]
+            perf = round(((float(close.iloc[-1]) - float(close.iloc[0])) / float(close.iloc[0])) * 100, 2)
+            result[label + "_perf_1m"] = perf
+        except Exception as e:
+            log.warning("Regional %s fehlgeschlagen: %s", ticker_sym, e)
+            result[label + "_perf_1m"] = None
+
+    spy_p = result.get("spy_perf_1m")
+    ezu_p = result.get("ezu_perf_1m")
+    if spy_p is not None and ezu_p is not None:
+        result["usa_vs_europe"] = round(spy_p - ezu_p, 2)
+    else:
+        result["usa_vs_europe"] = None
+
+    log.info("Regional: SPY %s%%, EZU %s%%, Diff: %s",
+             result.get("spy_perf_1m"), result.get("ezu_perf_1m"), result.get("usa_vs_europe"))
+    return result
+
+
+def fetch_seasonality():
+    """Berechnet historische monatliche Durchschnittsrenditen von IWDA.
+
+    Returns:
+        dict mit current_month, avg_return_pct, monthly_returns, seasonal_bias — oder None.
+    """
+    try:
+        ticker = yf.Ticker(IWDA_TICKER)
+        hist = ticker.history(period="max")
+        if hist.empty or len(hist) < 252:
+            log.warning("Saisonalität: nicht genug IWDA-Historie")
+            return None
+
+        monthly = hist["Close"].resample("ME").last()
+        monthly_returns = monthly.pct_change().dropna()
+
+        avg_by_month = {}
+        for idx, ret in monthly_returns.items():
+            m = idx.month
+            if m not in avg_by_month:
+                avg_by_month[m] = []
+            avg_by_month[m].append(float(ret))
+
+        monthly_avgs = {}
+        for m, rets in avg_by_month.items():
+            monthly_avgs[str(m)] = round(sum(rets) / len(rets) * 100, 2)
+
+        current_month = datetime.now().month
+        current_avg = monthly_avgs.get(str(current_month), 0.0)
+
+        if current_avg > 0.5:
+            bias = "bullish"
+        elif current_avg < -0.5:
+            bias = "bearish"
+        else:
+            bias = "neutral"
+
+        log.info("Saisonalität: Monat %d, avg %.2f%%, Bias: %s", current_month, current_avg, bias)
+        return {
+            "current_month": current_month,
+            "avg_return_pct": current_avg,
+            "monthly_returns": monthly_avgs,
+            "seasonal_bias": bias,
+        }
+    except Exception as e:
+        log.warning("Saisonalität fehlgeschlagen: %s", e)
+        return None
+
+
+def fetch_put_call_ratio():
+    """Berechnet Put/Call Ratio aus SPY Options Open Interest.
+
+    Returns:
+        dict mit put_oi, call_oi, ratio, signal — oder None bei Fehler.
+    """
+    try:
+        spy = yf.Ticker(SPY_TICKER)
+        dates = spy.options
+        if not dates:
+            log.warning("Put/Call: keine SPY-Optionstermine")
+            return None
+
+        chain = spy.option_chain(dates[0])
+        if chain is None:
+            return None
+
+        calls_df = chain.calls
+        puts_df = chain.puts
+
+        if calls_df.empty or puts_df.empty:
+            log.warning("Put/Call: leere Options-Chain")
+            return None
+
+        total_call_oi = int(calls_df["openInterest"].sum())
+        total_put_oi = int(puts_df["openInterest"].sum())
+
+        if total_call_oi == 0:
+            log.warning("Put/Call: Call OI ist 0")
+            return None
+
+        ratio = round(total_put_oi / total_call_oi, 2)
+
+        if ratio > 1.2:
+            signal = "bearish"
+        elif ratio < 0.7:
+            signal = "bullish"
+        else:
+            signal = "neutral"
+
+        log.info("Put/Call: Puts %d, Calls %d, Ratio %.2f (%s)", total_put_oi, total_call_oi, ratio, signal)
+        return {
+            "put_oi": total_put_oi,
+            "call_oi": total_call_oi,
+            "ratio": ratio,
+            "signal": signal,
+        }
+    except Exception as e:
+        log.warning("Put/Call Ratio fehlgeschlagen: %s", e)
+        return None
+
+
 def fetch_all_market_data(db, cpi_override=None):
     """Holt alle Marktdaten und gibt das vollständige market-Dict zurück."""
+    # Core-Daten (sequentiell — kritisch)
     iwda = fetch_iwda_data()
     vix = fetch_vix_data()
     yields = fetch_yields_data(db, cpi_override=cpi_override)
+
+    # Erweiterte Daten (parallel — alle optional)
+    extended = {}
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(fetch_sector_rotation): "sector_rotation",
+            executor.submit(fetch_regional_comparison): "regional",
+            executor.submit(fetch_seasonality): "seasonality",
+            executor.submit(fetch_put_call_ratio): "put_call",
+        }
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                extended[key] = future.result()
+            except Exception as e:
+                log.warning("%s fehlgeschlagen: %s", key, e)
+                extended[key] = None
 
     return {
         **iwda,
         "vix": vix,
         "yields": yields,
+        **extended,
     }
 
 
