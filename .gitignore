@@ -6,3 +6,10 @@ __pycache__/
 analysis_today.json
 logs/
 .env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Backend
+backend/__pycache__/

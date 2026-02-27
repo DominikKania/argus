@@ -1,0 +1,208 @@
+<template>
+  <div class="market-data-card">
+    <h3 class="section-title">
+      <i class="pi pi-chart-line" />
+      Marktdaten
+    </h3>
+    <div class="data-grid">
+      <!-- Kurs-Daten -->
+      <div class="data-column">
+        <h4 class="column-title">Kurs & Trend</h4>
+        <div class="data-row">
+          <span class="data-label">IWDA Kurs</span>
+          <span class="data-value font-bold">{{ market.price.toFixed(2) }} €</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">SMA 50</span>
+          <span class="data-value">{{ market.sma50.toFixed(2) }} €</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">SMA 200</span>
+          <span class="data-value">{{ market.sma200.toFixed(2) }} €</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">ATH</span>
+          <span class="data-value">
+            {{ market.ath.toFixed(2) }} €
+            <span class="delta" :class="market.delta_ath_pct < -5 ? 'delta-bad' : 'delta-ok'">
+              ({{ market.delta_ath_pct > 0 ? '+' : '' }}{{ market.delta_ath_pct.toFixed(1) }}%)
+            </span>
+          </span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Puffer SMA50</span>
+          <span class="data-value" :class="market.puffer_sma50_pct < 2 ? 'value-warn' : ''">
+            {{ market.puffer_sma50_pct.toFixed(1) }}%
+          </span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Golden Cross</span>
+          <span class="data-value">
+            <span class="gc-badge" :class="market.golden_cross ? 'gc-yes' : 'gc-no'">
+              {{ market.golden_cross ? 'Ja' : 'Nein' }}
+            </span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Makro-Daten -->
+      <div class="data-column">
+        <h4 class="column-title">VIX & Makro</h4>
+        <div class="data-row">
+          <span class="data-label">VIX</span>
+          <span class="data-value" :class="vixClass">
+            {{ market.vix.value.toFixed(1) }}
+            <i :class="directionIcon(market.vix.direction)" class="direction-arrow" />
+          </span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">VIX Vorwoche</span>
+          <span class="data-value">{{ market.vix.prev_week.toFixed(1) }}</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">US 10Y</span>
+          <span class="data-value">{{ market.yields.us10y.toFixed(2) }}%</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">US 2Y</span>
+          <span class="data-value">{{ market.yields.us2y.toFixed(2) }}%</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Spread</span>
+          <span class="data-value" :class="market.yields.spread <= 0 ? 'value-bad' : ''">
+            {{ market.yields.spread.toFixed(2) }}%
+            <i :class="directionIcon(market.yields.spread_direction)" class="direction-arrow" />
+          </span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Real Yield</span>
+          <span class="data-value">{{ market.yields.real_yield.toFixed(2) }}%</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">CPI</span>
+          <span class="data-value">{{ market.yields.cpi.toFixed(1) }}%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { MarketData } from '@/types/ampel'
+
+const props = defineProps<{
+  market: MarketData
+}>()
+
+const vixClass = computed(() => {
+  if (props.market.vix.value > 30) return 'value-bad'
+  if (props.market.vix.value > 25) return 'value-warn'
+  return ''
+})
+
+const directionIcon = (dir: string) => {
+  if (dir === 'rising' || dir === 'widening') return 'pi pi-arrow-up'
+  if (dir === 'falling' || dir === 'narrowing') return 'pi pi-arrow-down'
+  return 'pi pi-minus'
+}
+</script>
+
+<style lang="scss" scoped>
+.market-data-card {
+  border-radius: 12px;
+  padding: 1.25rem;
+  border: 1px solid var(--p-surface-border);
+  background: var(--p-surface-card);
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+  margin: 0 0 1rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--p-surface-border);
+
+  i { color: var(--p-primary-500); font-size: 1.125rem; }
+}
+
+.data-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+
+  @media screen and (max-width: 640px) {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+}
+
+.column-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--p-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 0.75rem 0;
+}
+
+.data-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.375rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  :root.dark & { border-bottom-color: rgba(255, 255, 255, 0.04); }
+}
+
+.data-label {
+  font-size: 0.8125rem;
+  color: var(--p-text-color-secondary);
+}
+
+.data-value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--p-text-color);
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.delta {
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.delta-ok { color: var(--p-text-color-secondary); }
+.delta-bad { color: #ef4444; }
+
+.value-warn { color: #d97706; :root.dark & { color: #fcd34d; } }
+.value-bad { color: #ef4444; :root.dark & { color: #fca5a5; } }
+
+.direction-arrow {
+  font-size: 0.6875rem;
+}
+
+.gc-badge {
+  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 600;
+
+  &.gc-yes {
+    background-color: rgba(16, 185, 129, 0.12);
+    color: #059669;
+    :root.dark & { background-color: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
+  }
+  &.gc-no {
+    background-color: rgba(239, 68, 68, 0.12);
+    color: #dc2626;
+    :root.dark & { background-color: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+  }
+}
+</style>
