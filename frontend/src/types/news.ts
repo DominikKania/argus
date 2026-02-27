@@ -18,6 +18,7 @@ export interface NewsResult {
   trend_reasoning?: string
   triggers_detected: string[]
   ampel_relevance: string
+  deep_research?: string | null
   created_date: string
 }
 

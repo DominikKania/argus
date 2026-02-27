@@ -7,7 +7,8 @@
         <i class="pi pi-comments" />
       </button>
     </h3>
-    <div class="data-grid">
+    <!-- Kern-Daten: 2 Spalten -->
+    <div class="core-grid">
       <!-- Kurs-Daten -->
       <div class="data-column">
         <h4 class="column-title">Kurs & Trend</h4>
@@ -86,15 +87,17 @@
           <span class="data-value">{{ market.yields.cpi.toFixed(1) }}%</span>
         </div>
       </div>
+    </div>
 
-      <!-- Erweiterte Daten -->
-      <div class="data-column" v-if="hasExtendedData">
-        <h4 class="column-title">Erweitert</h4>
+    <!-- Erweiterte Daten: flexible Kacheln -->
+    <div v-if="hasExtendedData" class="extended-section">
+      <h4 class="column-title">Erweiterte Indikatoren</h4>
+      <div class="extended-grid">
         <!-- Sector Rotation -->
-        <template v-if="market.sector_rotation">
-          <div class="data-row">
-            <span class="data-label">Risk-On/Off</span>
-            <span class="data-value" :class="riskOnClass">
+        <div v-if="market.sector_rotation" class="ext-tile">
+          <div class="ext-tile-header">
+            <span class="ext-tile-label">Sektor-Rotation</span>
+            <span class="ext-tile-value" :class="riskOnClass">
               {{ market.sector_rotation.risk_on_vs_off != null
                  ? formatSigned(market.sector_rotation.risk_on_vs_off) + 'pp'
                  : '-' }}
@@ -112,12 +115,13 @@
               </span>
             </div>
           </div>
-        </template>
+        </div>
+
         <!-- Regional -->
-        <template v-if="market.regional">
-          <div class="data-row">
-            <span class="data-label">USA vs EUR</span>
-            <span class="data-value">
+        <div v-if="market.regional" class="ext-tile">
+          <div class="ext-tile-header">
+            <span class="ext-tile-label">USA vs. Europa</span>
+            <span class="ext-tile-value">
               {{ market.regional.usa_vs_europe != null
                  ? formatSigned(market.regional.usa_vs_europe) + 'pp'
                  : '-' }}
@@ -137,52 +141,32 @@
               </span>
             </div>
           </div>
-        </template>
-        <!-- Put/Call -->
-        <template v-if="market.put_call">
-          <div class="data-row">
-            <span class="data-label">Put/Call</span>
-            <span class="data-value">
-              {{ market.put_call.ratio.toFixed(2) }}
-              <span class="signal-badge" :class="'signal-' + market.put_call.signal">
-                {{ market.put_call.signal }}
-              </span>
-            </span>
-          </div>
-        </template>
-        <!-- Seasonality -->
-        <template v-if="market.seasonality">
-          <div class="data-row">
-            <span class="data-label">Saisonalität</span>
-            <span class="data-value">
-              {{ formatSigned(market.seasonality.avg_return_pct) }}%
-              <span class="signal-badge" :class="'signal-' + market.seasonality.seasonal_bias">
-                {{ market.seasonality.seasonal_bias }}
-              </span>
-            </span>
-          </div>
-        </template>
+        </div>
+
         <!-- EUR/USD -->
-        <template v-if="market.eurusd">
-          <div class="data-row">
-            <span class="data-label">EUR/USD</span>
-            <span class="data-value">
+        <div v-if="market.eurusd" class="ext-tile">
+          <div class="ext-tile-header">
+            <span class="ext-tile-label">EUR/USD</span>
+            <span class="ext-tile-value">
               {{ market.eurusd.rate.toFixed(4) }}
               <i :class="directionIcon(market.eurusd.direction)" class="direction-arrow" />
             </span>
           </div>
-          <div class="data-row">
-            <span class="data-label">EUR/USD 1M</span>
-            <span class="data-value" :class="market.eurusd.change_1m_pct < -2 ? 'value-warn' : ''">
-              {{ formatSigned(market.eurusd.change_1m_pct) }}%
-            </span>
+          <div class="sector-details">
+            <div class="sector-item">
+              <span class="sector-name">1M Veränderung</span>
+              <span class="sector-perf" :class="market.eurusd.change_1m_pct >= 0 ? 'perf-pos' : 'perf-neg'">
+                {{ formatSigned(market.eurusd.change_1m_pct) }}%
+              </span>
+            </div>
           </div>
-        </template>
+        </div>
+
         <!-- Credit Spread -->
-        <template v-if="market.credit_spread">
-          <div class="data-row">
-            <span class="data-label">Credit Spread</span>
-            <span class="data-value" :class="creditSpreadClass">
+        <div v-if="market.credit_spread" class="ext-tile">
+          <div class="ext-tile-header">
+            <span class="ext-tile-label">Credit Spread</span>
+            <span class="ext-tile-value" :class="creditSpreadClass">
               {{ formatSigned(market.credit_spread.spread_proxy) }}pp
               <i :class="creditSpreadIcon" class="direction-arrow" />
             </span>
@@ -201,7 +185,33 @@
               </span>
             </div>
           </div>
-        </template>
+        </div>
+
+        <!-- Put/Call -->
+        <div v-if="market.put_call" class="ext-tile">
+          <div class="ext-tile-header">
+            <span class="ext-tile-label">Put/Call Ratio</span>
+            <span class="ext-tile-value">
+              {{ market.put_call.ratio.toFixed(2) }}
+              <span class="signal-badge" :class="'signal-' + market.put_call.signal">
+                {{ market.put_call.signal }}
+              </span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Seasonality -->
+        <div v-if="market.seasonality" class="ext-tile">
+          <div class="ext-tile-header">
+            <span class="ext-tile-label">Saisonalität</span>
+            <span class="ext-tile-value">
+              {{ formatSigned(market.seasonality.avg_return_pct) }}%
+              <span class="signal-badge" :class="'signal-' + market.seasonality.seasonal_bias">
+                {{ market.seasonality.seasonal_bias }}
+              </span>
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -313,18 +323,66 @@ const formatSectorName = (name: string) => {
   &:hover { opacity: 1 !important; color: var(--p-primary-500); background: var(--p-surface-ground); }
 }
 
-.data-grid {
+.core-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 2rem;
 
-  @media screen and (max-width: 960px) {
-    grid-template-columns: 1fr 1fr;
-  }
   @media screen and (max-width: 640px) {
     grid-template-columns: 1fr;
     gap: 1.5rem;
   }
+}
+
+.extended-section {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--p-surface-border);
+}
+
+.extended-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+
+  @media screen and (max-width: 960px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  @media screen and (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ext-tile {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: var(--p-surface-ground);
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+
+  &:hover { border-color: var(--p-surface-border); }
+}
+
+.ext-tile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.ext-tile-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--p-text-color-secondary);
+}
+
+.ext-tile-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
 }
 
 .column-title {

@@ -170,6 +170,179 @@ REGELN:
 """
 
 
+NEWS_DEEP_RESEARCH_SYSTEM = """\
+Du bist ein Deep-Research-Analyst im Argus Investment-System. Du führst eine tiefgehende \
+Analyse zu einem spezifischen News-Thema durch.
+
+Du erhältst:
+1. Das Thema und den Analyse-Fokus
+2. Die heutige Headline-Analyse (Zusammenfassung, Trend, relevante Headlines)
+3. Optional: Bisherige Analysen (Verlauf)
+4. Optional: Marktkontext
+
+## HEUTIGES DATUM
+{today}
+
+## PORTFOLIO-KONTEXT
+Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+
+## DEINE AUFGABE
+1. Nutze die Web-Suche um aktuelle Nachrichten und Entwicklungen zum Thema zu finden
+2. Suche nach konkreten, aktuellen Artikeln — nicht nur Überschriften
+3. Erstelle eine tiefgehende Analyse im Markdown-Format basierend auf den gefundenen Quellen
+
+### Hintergrund & Einordnung
+Was passiert gerade? Historischer Kontext, beteiligte Akteure, bisheriger Verlauf.
+
+### Aktuelle Entwicklung
+Was ist neu? Basierend auf den Suchergebnissen UND den Headlines.
+
+### Szenarien (nächste 4-6 Wochen)
+- **Positiv:** Was könnte sich verbessern?
+- **Negativ:** Was könnte eskalieren?
+- **Wahrscheinlichstes:** Was ist am realistischsten?
+
+### Portfolio-Auswirkungen
+Konkrete Auswirkungen auf den MSCI World ETF. Welche Sektoren/Regionen sind betroffen?
+
+### Beobachtungspunkte
+Was sollte der Anleger in den nächsten Tagen/Wochen beobachten?
+
+### Quellen
+Liste die wichtigsten Quellen auf die du gefunden hast (Titel + URL).
+
+**Relevanz-Zusammenfassung:** Ein Satz der die Kernaussage für die Ampel-Analyse zusammenfasst.
+
+## REGELN
+- Alle Texte auf Deutsch
+- Einfache, verständliche Sprache — keine Fachkürzel oder Paragraphen-Nummern
+- Faktenbasiert — beziehe dich auf konkrete Quellen aus der Web-Suche
+- Konkret: Nenne Zahlen, Daten, Zeiträume wenn möglich
+- Max. 4-6 Wochen Zeithorizont für Szenarien
+- Suche nach aktuellen Nachrichten, Analysen und Experteneinschätzungen zum Thema
+- Suche auf Deutsch UND Englisch für bessere Abdeckung\
+"""
+
+
+def deep_research_news_topic(topic_doc, headline_result, market_context=None, previous_results=None):
+    """Führt eine tiefgehende Analyse zu einem News-Topic durch mit Web-Suche.
+
+    Nutzt die Anthropic Web Search API um aktuelle Nachrichten und Analysen
+    zum Thema zu finden und daraus eine fundierte Deep Research zu erstellen.
+
+    Args:
+        topic_doc: MongoDB-Dokument des Topics (mit prompt, title)
+        headline_result: Ergebnis der Headline-Analyse (summary, trend, etc.)
+        market_context: Optional, letzte Analyse als String
+        previous_results: Optional, Liste bisheriger Analysen (neueste zuerst)
+
+    Returns:
+        Markdown-String mit der Deep-Research-Analyse, oder None bei Fehler
+    """
+    import os
+    from datetime import datetime as _dt
+
+    parts = [
+        f"## THEMA: {topic_doc['title']}",
+        "",
+        "## ANALYSE-FOKUS",
+        topic_doc.get("prompt", "Allgemeine Analyse"),
+        "",
+        f"Suche nach aktuellen Nachrichten zum Thema '{topic_doc['title']}' und erstelle eine tiefgehende Analyse.",
+        "",
+        "## HEUTIGE HEADLINE-ANALYSE (aus RSS-Feeds)",
+        f"Trend: {headline_result.get('trend', 'stable')}",
+        f"Zusammenfassung: {headline_result.get('summary', 'Keine')}",
+    ]
+
+    if headline_result.get("relevant_headlines"):
+        parts.append("\nRelevante Headlines:")
+        for h in headline_result["relevant_headlines"]:
+            sentiment = h.get("sentiment", "neutral")
+            parts.append(f"  - [{sentiment}] {h.get('title', '?')}")
+
+    if headline_result.get("triggers_detected"):
+        parts.append(f"\nErkannte Trigger: {', '.join(headline_result['triggers_detected'])}")
+
+    if previous_results:
+        parts.extend(["", f"## BISHERIGE ANALYSEN (letzte {len(previous_results)} Tage)"])
+        for prev in previous_results:
+            parts.append(f"- {prev['date']}: {prev.get('trend', '?')} — {prev.get('summary', '')}")
+
+    if market_context:
+        parts.extend(["", "## MARKTKONTEXT", market_context])
+
+    system = NEWS_DEEP_RESEARCH_SYSTEM.format(today=_dt.now().strftime("%Y-%m-%d"))
+    user_prompt = "\n".join(parts)
+
+    # Try Anthropic Web Search first, fall back to regular LLM call
+    provider = os.environ.get("ARGUS_LLM_PROVIDER", "anthropic")
+    api_key = os.environ.get("ARGUS_LLM_API_KEY")
+    model = os.environ.get("ARGUS_LLM_MODEL", "claude-sonnet-4-5-20250929")
+
+    if provider == "anthropic" and api_key:
+        try:
+            from anthropic import Anthropic
+            client = Anthropic(api_key=api_key)
+            log.info("Deep-Research mit Web-Suche für: %s", topic_doc["title"])
+
+            response = client.messages.create(
+                model=model,
+                max_tokens=4096,
+                system=system,
+                messages=[{"role": "user", "content": user_prompt}],
+                tools=[{
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 5,
+                }],
+            )
+
+            # Extract text and source URLs from response content blocks
+            text_parts = []
+            source_urls = []
+            for block in response.content:
+                if hasattr(block, "text"):
+                    text_parts.append(block.text)
+                # Collect URLs from web search results
+                if block.type == "web_search_tool_result":
+                    for item in getattr(block, "content", []):
+                        if hasattr(item, "url") and hasattr(item, "title"):
+                            source_urls.append({"title": item.title, "url": item.url})
+
+            result_text = "".join(text_parts).strip()
+
+            # Append sources section if URLs were found and not already in text
+            if result_text and source_urls and "Quellen" not in result_text:
+                seen = set()
+                unique_sources = []
+                for s in source_urls:
+                    if s["url"] not in seen:
+                        seen.add(s["url"])
+                        unique_sources.append(s)
+                if unique_sources:
+                    result_text += "\n\n### Quellen\n"
+                    for s in unique_sources[:10]:
+                        result_text += f"- [{s['title']}]({s['url']})\n"
+
+            if result_text:
+                log.info("Deep-Research mit Web-Suche abgeschlossen: %d Zeichen, %d Blöcke, %d Quellen",
+                         len(result_text), len(text_parts), len(source_urls))
+                return result_text
+            return None
+
+        except Exception as e:
+            log.warning("Web-Search Deep-Research fehlgeschlagen, Fallback auf regulären LLM-Call: %s", e)
+
+    # Fallback: regulärer LLM-Call ohne Web-Suche
+    try:
+        from ampel_auto import call_llm
+        return call_llm(system, user_prompt, temperature=0.3)
+    except Exception as e:
+        log.error("Deep-Research fehlgeschlagen für %s: %s", topic_doc.get("topic", "?"), e)
+        return None
+
+
 def analyze_news_topic(topic_doc, headlines, market_context=None, previous_results=None):
     """Analysiert gesammelte Headlines für ein bestimmtes Topic via Claude.
 
@@ -269,9 +442,15 @@ def run_news_topic(db, topic_slug, headlines=None):
         ).sort("date", -1).limit(5)
     )
 
-    # Analyse durchführen
+    # Headline-Analyse durchführen
     log.info("News-Analyse starten: %s (%d bisherige Ergebnisse)", topic["title"], len(previous_results))
     result = analyze_news_topic(topic, headlines, market_context, previous_results)
+
+    # Deep Research durchführen
+    log.info("Deep-Research starten: %s", topic["title"])
+    deep_research = deep_research_news_topic(topic, result, market_context, previous_results)
+    if deep_research:
+        log.info("Deep-Research abgeschlossen: %s (%d Zeichen)", topic["title"], len(deep_research))
 
     # Ergebnis speichern
     today = datetime.now().strftime("%Y-%m-%d")
@@ -286,6 +465,7 @@ def run_news_topic(db, topic_slug, headlines=None):
         "trend_reasoning": result.get("trend_reasoning", ""),
         "triggers_detected": result.get("triggers_detected", []),
         "ampel_relevance": result.get("ampel_relevance", ""),
+        "deep_research": deep_research,
         "raw_headlines": headlines,
         "created_date": datetime.now().isoformat(),
     }
@@ -297,7 +477,7 @@ def run_news_topic(db, topic_slug, headlines=None):
         upsert=True,
     )
 
-    log.info("News-Ergebnis gespeichert: %s → %s", topic["title"], result.get("trend", "?"))
+    log.info("News-Ergebnis gespeichert: %s - %s", topic["title"], result.get("trend", "?"))
     return doc
 
 

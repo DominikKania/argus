@@ -195,6 +195,15 @@
               <span class="relevance-label">Relevanz für Ampel:</span>
               {{ latestResult.ampel_relevance }}
             </div>
+
+            <!-- Deep Research -->
+            <div v-if="latestResult.deep_research" class="deep-research-section">
+              <button class="deep-research-toggle" @click="deepResearchOpen = !deepResearchOpen">
+                <i :class="deepResearchOpen ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" />
+                <label class="section-label">Deep Research</label>
+              </button>
+              <div v-if="deepResearchOpen" class="deep-research-content" v-html="renderMarkdown(latestResult.deep_research)" />
+            </div>
           </div>
 
           <!-- Results History -->
@@ -272,6 +281,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { marked } from 'marked'
 import { useNewsStore } from '@/stores/newsStore'
 import { useChatStore } from '@/stores/chatStore'
 import type { NewsTopic, NewsResult } from '@/types/news'
@@ -292,6 +302,11 @@ const createError = ref('')
 const generatingPrompt = ref(false)
 const editablePrompt = ref('')
 const runningAll = ref(false)
+const deepResearchOpen = ref(true)
+
+function renderMarkdown(md: string): string {
+  return marked.parse(md, { async: false }) as string
+}
 
 const activeTopicsCount = computed(() => newsStore.topics.filter((t) => t.active).length)
 
@@ -911,6 +926,80 @@ onMounted(() => {
   font-weight: 600;
   color: #059669;
   :root.dark & { color: #6ee7b7; }
+}
+
+// Deep Research
+.deep-research-section {
+  border-top: 1px solid var(--p-surface-border);
+  padding-top: 1rem;
+  margin-top: 1rem;
+}
+
+.deep-research-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  margin-bottom: 0.75rem;
+
+  i {
+    font-size: 0.75rem;
+    color: var(--p-text-color-secondary);
+    transition: transform 0.15s;
+  }
+
+  .section-label {
+    margin-bottom: 0;
+    cursor: pointer;
+  }
+
+  &:hover .section-label { color: var(--p-text-color); }
+}
+
+.deep-research-content {
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: var(--p-text-color);
+  padding: 1rem;
+  border-radius: 8px;
+  background: var(--p-surface-ground);
+
+  :deep(h3) {
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin: 1rem 0 0.5rem;
+    color: var(--p-text-color);
+
+    &:first-child { margin-top: 0; }
+  }
+
+  :deep(h4) {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    margin: 0.75rem 0 0.375rem;
+  }
+
+  :deep(p) {
+    margin: 0.375rem 0;
+  }
+
+  :deep(ul), :deep(ol) {
+    padding-left: 1.25rem;
+    margin: 0.375rem 0;
+  }
+
+  :deep(li) {
+    margin: 0.25rem 0;
+  }
+
+  :deep(strong) {
+    font-weight: 600;
+    color: var(--p-text-color);
+  }
 }
 
 // History

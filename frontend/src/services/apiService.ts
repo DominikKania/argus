@@ -3,6 +3,7 @@ import axios from 'axios'
 const apiClient = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
+  timeout: 300_000, // 5 minutes — news analysis with web search can take 2+ minutes
 })
 
 export const ApiService = {

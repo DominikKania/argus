@@ -77,7 +77,7 @@ Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6
 3. Bestimme das Sentiment-Signal (mechanisch + Kontext)
 4. Erstelle die Gesamtbewertung (Overall Rating)
 5. Formuliere eine Empfehlung
-6. Erstelle optional eine These mit Katalysator
+6. Erstelle optional eine These mit Katalysator (max. 4-6 Wochen Zeithorizont!)
 7. Setze Eskalations-Trigger und Crash-Regel
 
 ## SIGNAL-REGELN
@@ -198,7 +198,7 @@ Verwende exakt dieses Schema:
   "thesis": {
     "statement": "Klarer Satz in einfachem Deutsch, ohne Fachkürzel oder Gesetzesbezeichnungen",
     "catalyst": "Was genau muss passieren? In einfachen Worten",
-    "catalyst_date": "YYYY-MM-DD",
+    "catalyst_date": "YYYY-MM-DD (max 4-6 Wochen in der Zukunft!)",
     "expected_if_positive": "Was passiert für mein ETF wenn die These eintritt?",
     "expected_if_negative": "Was passiert für mein ETF wenn die These nicht eintritt?"
   },
@@ -226,6 +226,9 @@ Stattdessen in einfachen Worten erklären (z.B. "US-Notfallzölle" statt "Sectio
 - sentiment_events enthält genau 3 Einträge
 - beller_check.triggered=false und Felder auf null wenn Ampel GRÜN
 - thesis darf null sein wenn keine neue These sinnvoll ist
+- thesis: MAXIMALER Zeithorizont 4-6 Wochen! Keine Thesen über Monate hinweg. \
+Lieber einen konkreten nächsten Schritt testen (z.B. "Reagiert die EU bis Mitte März?") \
+als ein vages Langfrist-Szenario. catalyst_date muss 2-6 Wochen in der Zukunft liegen.
 - thesis: Statement, Katalysator und Szenarien müssen ohne Vorwissen verständlich sein
 - market_context: Kurze Notizen zu erweiterten Marktdaten, nur ausfüllen wenn relevant
 """

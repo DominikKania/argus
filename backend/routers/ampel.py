@@ -64,11 +64,13 @@ Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6
 - Das JSON hat exakt diese Felder:
   - "statement": Die Kernaussage der These — ein klarer, verständlicher Satz
   - "catalyst": Was genau muss passieren? In einfachen Worten
-  - "catalyst_date": Datum im Format YYYY-MM-DD (oder null) — MUSS in der Zukunft liegen!
+  - "catalyst_date": Datum im Format YYYY-MM-DD — max. 4-6 Wochen in der Zukunft!
   - "expected_if_positive": Was passiert für mein Portfolio wenn die These eintritt?
   - "expected_if_negative": Was passiert für mein Portfolio wenn die These nicht eintritt?
 - Die These muss testbar und zeitlich eingrenzbar sein
-- WICHTIG: Alle Daten müssen im aktuellen Jahr ({year}) oder später liegen!"""
+- WICHTIG: Zeithorizont max. 4-6 Wochen! Lieber einen konkreten nächsten Schritt \
+testen als ein vages Langfrist-Szenario. Keine Thesen über Monate hinweg.
+- Alle Daten müssen im aktuellen Jahr ({year}) oder später liegen!"""
 
 
 def _serialize_doc(doc):
@@ -129,10 +131,59 @@ def update_thesis(thesis_id: str, req: UpdateThesisRequest):
     return _serialize_doc(updated)
 
 
+def _build_news_context(db) -> str:
+    """Build news context from latest results for all active topics."""
+    results = list(
+        db.news_results.find(
+            {},
+            {"raw_headlines": 0, "_id": 0},
+        ).sort("date", -1).limit(10)
+    )
+    if not results:
+        return ""
+
+    parts = ["\n## AKTUELLE NEWS-DATEN"]
+    seen_topics = set()
+    for r in results:
+        topic = r.get("topic", "")
+        if topic in seen_topics:
+            continue
+        seen_topics.add(topic)
+
+        parts.append(f"\n### {topic} ({r.get('date', '?')})")
+        if r.get("summary"):
+            parts.append(f"Zusammenfassung: {r['summary']}")
+        if r.get("trend"):
+            parts.append(f"Trend: {r['trend']}")
+        if r.get("triggers_detected"):
+            parts.append(f"Trigger: {', '.join(r['triggers_detected'])}")
+        if r.get("ampel_relevance"):
+            parts.append(f"Ampel-Relevanz: {r['ampel_relevance']}")
+
+        headlines = r.get("relevant_headlines", [])
+        high = [h for h in headlines if h.get("relevance") == "high"]
+        if high:
+            parts.append("Wichtigste Schlagzeilen:")
+            for h in high[:5]:
+                sentiment = h.get("sentiment", "neutral")
+                parts.append(f"  - [{sentiment}] {h.get('title', '?')}")
+
+        if r.get("deep_research"):
+            # First 500 chars of deep research as context
+            preview = r["deep_research"][:500]
+            if len(r["deep_research"]) > 500:
+                preview += "..."
+            parts.append(f"Deep-Research-Auszug: {preview}")
+
+    return "\n".join(parts)
+
+
 @router.post("/theses/refine")
 def refine_thesis(req: RefineThesisRequest):
     """Refine a thesis based on chat conversation."""
     try:
+        db = get_db()
+
         parts = [
             "## Original-These",
             f"**Statement:** {req.thesis.get('statement', '')}",
@@ -146,11 +197,16 @@ def refine_thesis(req: RefineThesisRequest):
         if req.thesis.get("expected_if_negative"):
             parts.append(f"**Wenn negativ:** {req.thesis['expected_if_negative']}")
 
+        # Add news context
+        news_ctx = _build_news_context(db)
+        if news_ctx:
+            parts.append(news_ctx)
+
         parts.append("\n## Gesprächsverlauf")
         for msg in req.chat_history:
             role = "Benutzer" if msg.get("role") == "user" else "Tutor"
             parts.append(f"\n**{role}:** {msg.get('content', '')}")
-        parts.append("\n\nErstelle jetzt die verbesserte These als JSON.")
+        parts.append("\n\nErstelle jetzt die verbesserte These als JSON. Nutze die News-Daten als Faktengrundlage.")
 
         now = datetime.now()
         system = REFINE_THESIS_SYSTEM.format(today=now.strftime("%Y-%m-%d"), year=now.year)
