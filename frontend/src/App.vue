@@ -54,6 +54,12 @@ createNavigation({
       to: '/ampel',
       active: route.path.startsWith('/ampel'),
     },
+    {
+      label: 'Thesen',
+      icon: 'pi pi-bookmark',
+      to: '/thesen',
+      active: route.path.startsWith('/thesen'),
+    },
   ],
 })
 </script>

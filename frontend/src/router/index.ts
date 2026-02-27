@@ -18,6 +18,12 @@ const routes = [
         component: () => import('@/views/AmpelView.vue'),
         meta: { title: 'Ampel' },
       },
+      {
+        path: 'thesen',
+        name: 'thesen',
+        component: () => import('@/views/ThesenView.vue'),
+        meta: { title: 'Thesen' },
+      },
     ],
   },
 ]

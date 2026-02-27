@@ -50,6 +50,27 @@ export const useAmpelStore = defineStore('ampel', () => {
     }
   }
 
+  async function fetchDashboard() {
+    loading.value = true
+    error.value = null
+    try {
+      await Promise.all([fetchLatestQuiet(), fetchThesesQuiet()])
+    } catch (err) {
+      error.value = 'Fehler beim Laden des Dashboards'
+      console.error(err)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchLatestQuiet() {
+    latestAnalysis.value = await ApiService.get<Analysis>(API_ENDPOINTS.AMPEL.LATEST)
+  }
+
+  async function fetchThesesQuiet() {
+    theses.value = await ApiService.get<OpenThesis[]>(API_ENDPOINTS.AMPEL.THESES)
+  }
+
   return {
     latestAnalysis,
     history,
@@ -59,5 +80,6 @@ export const useAmpelStore = defineStore('ampel', () => {
     fetchLatest,
     fetchHistory,
     fetchTheses,
+    fetchDashboard,
   }
 })
