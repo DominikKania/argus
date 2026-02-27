@@ -24,6 +24,12 @@ const routes = [
         component: () => import('@/views/ThesenView.vue'),
         meta: { title: 'Thesen' },
       },
+      {
+        path: 'kurse',
+        name: 'kurse',
+        component: () => import('@/views/KurseView.vue'),
+        meta: { title: 'Kurse' },
+      },
     ],
   },
 ]

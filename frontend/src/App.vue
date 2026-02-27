@@ -60,6 +60,12 @@ createNavigation({
       to: '/thesen',
       active: route.path.startsWith('/thesen'),
     },
+    {
+      label: 'Kurse',
+      icon: 'pi pi-chart-line',
+      to: '/kurse',
+      active: route.path.startsWith('/kurse'),
+    },
   ],
 })
 </script>

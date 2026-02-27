@@ -5,4 +5,9 @@ export const API_ENDPOINTS = {
     HISTORY: (limit = 10) => `/ampel/history?limit=${limit}`,
     THESES: '/ampel/theses',
   },
+  PRICES: {
+    WATCHLIST: '/prices/watchlist',
+    TICKER: (ticker: string, days = 30) => `/prices/${ticker}?days=${days}`,
+  },
+  CHAT: '/chat/',
 } as const
