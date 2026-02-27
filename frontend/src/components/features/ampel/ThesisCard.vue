@@ -4,10 +4,10 @@
       <i class="pi pi-lightbulb" />
       These
     </h3>
-    <p class="thesis-statement">{{ thesis.statement }}</p>
+    <p class="thesis-statement">{{ displayStatement }}</p>
     <div v-if="thesis.catalyst" class="catalyst">
       <span class="catalyst-label">Katalysator:</span>
-      <span class="catalyst-text">{{ thesis.catalyst }}</span>
+      <span class="catalyst-text">{{ displayCatalyst }}</span>
       <span v-if="thesis.catalyst_date" class="catalyst-date">
         <i class="pi pi-calendar" />
         {{ thesis.catalyst_date }}
@@ -16,22 +16,34 @@
     <div class="scenarios">
       <div v-if="thesis.expected_if_positive" class="scenario scenario-positive">
         <span class="scenario-icon">+</span>
-        <p class="scenario-text">{{ thesis.expected_if_positive }}</p>
+        <p class="scenario-text">{{ displayPositive }}</p>
       </div>
       <div v-if="thesis.expected_if_negative" class="scenario scenario-negative">
         <span class="scenario-icon">-</span>
-        <p class="scenario-text">{{ thesis.expected_if_negative }}</p>
+        <p class="scenario-text">{{ displayNegative }}</p>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Thesis } from '@/types/ampel'
+import { useDummyModeStore } from '@/stores/dummyModeStore'
+import { useAmpelStore } from '@/stores/ampelStore'
 
-defineProps<{
+const props = defineProps<{
   thesis: Thesis
 }>()
+
+const dummyModeStore = useDummyModeStore()
+const ampelStore = useAmpelStore()
+const s = computed(() => dummyModeStore.isDummyMode ? ampelStore.latestAnalysis?.simplified?.thesis : null)
+
+const displayStatement = computed(() => s.value?.statement || props.thesis.statement)
+const displayCatalyst = computed(() => s.value?.catalyst || props.thesis.catalyst)
+const displayPositive = computed(() => s.value?.expected_if_positive || props.thesis.expected_if_positive)
+const displayNegative = computed(() => s.value?.expected_if_negative || props.thesis.expected_if_negative)
 </script>
 
 <style lang="scss" scoped>

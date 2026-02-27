@@ -16,18 +16,33 @@
         {{ signal.context }}
       </span>
     </div>
-    <p v-if="signal.note" class="signal-note">{{ signal.note }}</p>
+    <p v-if="displayNote" class="signal-note">{{ displayNote }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Signal, SignalColor } from '@/types/ampel'
+import { useDummyModeStore } from '@/stores/dummyModeStore'
+import { useAmpelStore } from '@/stores/ampelStore'
 
 const props = defineProps<{
   name: string
   signal: Signal
 }>()
+
+const dummyModeStore = useDummyModeStore()
+const ampelStore = useAmpelStore()
+
+const displayNote = computed(() => {
+  if (dummyModeStore.isDummyMode) {
+    const simplified = ampelStore.latestAnalysis?.simplified
+    if (simplified?.signal_notes?.[props.name]) {
+      return simplified.signal_notes[props.name]
+    }
+  }
+  return props.signal.note
+})
 
 const nameMap: Record<string, string> = {
   trend: 'Trend',

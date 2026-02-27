@@ -12,7 +12,7 @@
         :class="{ 'event-primary': event.is_primary }"
       >
         <div class="event-header">
-          <span class="event-headline">{{ event.headline }}</span>
+          <span class="event-headline">{{ displayEvent(event, index).headline }}</span>
           <div class="event-badges">
             <span class="impact-badge" :class="impactClass(event.affects_portfolio)">
               {{ impactLabel(event.affects_portfolio) }}
@@ -22,7 +22,7 @@
             </span>
           </div>
         </div>
-        <p v-if="event.summary" class="event-summary">{{ event.summary }}</p>
+        <p v-if="displayEvent(event, index).summary" class="event-summary">{{ displayEvent(event, index).summary }}</p>
       </div>
     </div>
   </div>
@@ -30,10 +30,28 @@
 
 <script setup lang="ts">
 import type { SentimentEvent } from '@/types/ampel'
+import { useDummyModeStore } from '@/stores/dummyModeStore'
+import { useAmpelStore } from '@/stores/ampelStore'
 
 defineProps<{
   events: SentimentEvent[]
 }>()
+
+const dummyModeStore = useDummyModeStore()
+const ampelStore = useAmpelStore()
+
+const displayEvent = (event: SentimentEvent, index: number) => {
+  if (dummyModeStore.isDummyMode) {
+    const simplified = ampelStore.latestAnalysis?.simplified?.sentiment_events?.[index]
+    if (simplified) {
+      return {
+        headline: simplified.headline || event.headline,
+        summary: simplified.summary || event.summary,
+      }
+    }
+  }
+  return event
+}
 
 const impactLabel = (impact?: string) => {
   const map: Record<string, string> = { direct: 'Direkt', sector_only: 'Sektor', indirect: 'Indirekt' }

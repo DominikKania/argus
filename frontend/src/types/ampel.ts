@@ -80,6 +80,21 @@ export interface Thesis {
   expected_if_negative?: string
 }
 
+export interface SimplifiedTexts {
+  rating_reasoning: string
+  recommendation_detail: string
+  escalation_trigger: string
+  signal_notes: Record<string, string>
+  sentiment_events: Array<{ headline: string; summary: string }>
+  beller_check_reasoning: string
+  thesis?: {
+    statement: string
+    catalyst: string
+    expected_if_positive: string
+    expected_if_negative: string
+  }
+}
+
 export interface Analysis {
   _id: string
   date: string
@@ -93,6 +108,7 @@ export interface Analysis {
   thesis?: Thesis
   escalation_trigger?: string
   crash_rule_active?: boolean
+  simplified?: SimplifiedTexts
 }
 
 export interface OpenThesis {

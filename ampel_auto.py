@@ -283,6 +283,76 @@ def extract_json(text):
     raise ValueError("Unvollständiges JSON-Objekt in LLM-Antwort")
 
 
+# ── Einsteiger-Modus (Vereinfachung) ────────────────────────────────────
+
+SIMPLIFY_SYSTEM_PROMPT = """\
+Du bist ein freundlicher Erklärer für Börsen-Anfänger. Du bekommst Analyse-Texte \
+eines Investment-Systems und sollst sie in einfaches, verständliches Deutsch umschreiben.
+
+REGELN:
+- Erkläre JEDEN Fachbegriff in Klammern beim ersten Vorkommen:
+  - ATH = Allzeithoch (der höchste Kurs, den es je gab)
+  - SMA50/SMA200 = Durchschnittskurs der letzten 50/200 Tage
+  - Golden Cross = wenn der 50-Tage-Schnitt über den 200-Tage-Schnitt steigt (gutes Zeichen)
+  - Puffer = Abstand zwischen aktuellem Kurs und einem wichtigen Niveau
+  - VIX = Angstbarometer der Börse (niedrig = ruhig, hoch = nervös)
+  - Spread = Differenz zwischen zwei Zinssätzen
+  - Stop-Loss = Kurs bei dem man verkauft um Verluste zu begrenzen
+  - Beller = kurzfristiger Schreck an der Börse, erholt sich schnell
+  - Beisser = ernstes Problem, dauert länger
+  - Hedge = Absicherung gegen Verluste
+  - CPI = Verbraucherpreisindex (misst die Inflation)
+  - Real Yield = Realzins (Zins minus Inflation)
+- Zahlen, Prozentwerte und Daten NICHT verändern — exakt übernehmen
+- Kurze, klare Sätze verwenden
+- Freundlicher, ermutigender Ton — kein Fachchinesisch
+- Antworte AUSSCHLIESSLICH mit einem JSON-Objekt, kein Text davor oder danach
+- Verwende exakt dieselben JSON-Schlüssel wie im Input
+"""
+
+
+def simplify_analysis(analysis):
+    """Vereinfacht alle Textfelder einer Analyse für den Einsteiger-Modus."""
+
+    # Textfelder extrahieren
+    texts = {
+        "rating_reasoning": analysis.get("rating", {}).get("reasoning", ""),
+        "recommendation_detail": analysis.get("recommendation", {}).get("detail", ""),
+        "escalation_trigger": analysis.get("escalation_trigger", "") or "",
+        "signal_notes": {
+            name: sig.get("note", "")
+            for name, sig in analysis.get("signals", {}).items()
+        },
+        "sentiment_events": [
+            {"headline": e.get("headline", ""), "summary": e.get("summary", "")}
+            for e in analysis.get("sentiment_events", [])
+        ],
+        "beller_check_reasoning": (analysis.get("beller_check") or {}).get("reasoning", "") or "",
+    }
+
+    thesis = analysis.get("thesis")
+    if thesis:
+        texts["thesis"] = {
+            "statement": thesis.get("statement", ""),
+            "catalyst": thesis.get("catalyst", ""),
+            "expected_if_positive": thesis.get("expected_if_positive", ""),
+            "expected_if_negative": thesis.get("expected_if_negative", ""),
+        }
+
+    user_prompt = (
+        "Vereinfache diese Analyse-Texte für einen Börsen-Anfänger.\n"
+        "Gib die vereinfachten Texte als JSON mit exakt denselben Schlüsseln zurück.\n\n"
+        + json.dumps(texts, ensure_ascii=False, indent=2)
+    )
+
+    try:
+        llm_text = call_llm(SIMPLIFY_SYSTEM_PROMPT, user_prompt)
+        return extract_json(llm_text)
+    except Exception as e:
+        log.warning("Vereinfachung fehlgeschlagen: %s", e)
+        return None
+
+
 # ── Hybrid-Merge ─────────────────────────────────────────────────────────
 
 def merge_analysis(date_str, market, mech_signals, mech_score, llm_data):
@@ -431,7 +501,16 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
             print(f"Fehler: Retry fehlgeschlagen. Abbruch.", file=sys.stderr)
             return None
 
-    # 8. Speichern oder Dry-Run
+    # 8. Einsteiger-Modus: Textfelder vereinfachen
+    print("Erstelle Einsteiger-Version...")
+    simplified = simplify_analysis(analysis)
+    if simplified:
+        analysis["simplified"] = simplified
+        log.info("Einsteiger-Version erstellt.")
+    else:
+        log.warning("Einsteiger-Version konnte nicht erstellt werden — fahre ohne fort.")
+
+    # 9. Speichern oder Dry-Run
     if dry_run:
         print("\n--- DRY RUN (nicht gespeichert) ---")
         print(json.dumps(analysis, indent=2, ensure_ascii=False))

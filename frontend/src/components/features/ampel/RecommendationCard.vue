@@ -6,20 +6,20 @@
     </h3>
 
     <div class="recommendation-detail">
-      <p class="detail-text">{{ analysis.recommendation.detail }}</p>
+      <p class="detail-text">{{ displayDetail }}</p>
     </div>
 
-    <div v-if="analysis.rating.reasoning" class="reasoning">
+    <div v-if="displayReasoning" class="reasoning">
       <h4 class="sub-title">Begründung</h4>
-      <p class="reasoning-text">{{ analysis.rating.reasoning }}</p>
+      <p class="reasoning-text">{{ displayReasoning }}</p>
     </div>
 
-    <div v-if="analysis.escalation_trigger" class="escalation">
+    <div v-if="displayEscalation" class="escalation">
       <h4 class="sub-title escalation-title">
         <i class="pi pi-exclamation-triangle" />
         Eskalations-Trigger
       </h4>
-      <p class="escalation-text">{{ analysis.escalation_trigger }}</p>
+      <p class="escalation-text">{{ displayEscalation }}</p>
     </div>
 
     <div v-if="analysis.beller_check?.triggered" class="beller-check">
@@ -32,8 +32,8 @@
           {{ analysis.beller_check.trigger_type }}
         </span>
       </div>
-      <p v-if="analysis.beller_check.reasoning" class="beller-reasoning">
-        {{ analysis.beller_check.reasoning }}
+      <p v-if="displayBellerReasoning" class="beller-reasoning">
+        {{ displayBellerReasoning }}
       </p>
     </div>
   </div>
@@ -42,10 +42,27 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Analysis } from '@/types/ampel'
+import { useDummyModeStore } from '@/stores/dummyModeStore'
 
 const props = defineProps<{
   analysis: Analysis
 }>()
+
+const dummyModeStore = useDummyModeStore()
+const s = computed(() => dummyModeStore.isDummyMode ? props.analysis.simplified : null)
+
+const displayDetail = computed(() =>
+  s.value?.recommendation_detail || props.analysis.recommendation.detail
+)
+const displayReasoning = computed(() =>
+  s.value?.rating_reasoning || props.analysis.rating.reasoning
+)
+const displayEscalation = computed(() =>
+  s.value?.escalation_trigger || props.analysis.escalation_trigger
+)
+const displayBellerReasoning = computed(() =>
+  s.value?.beller_check_reasoning || props.analysis.beller_check?.reasoning
+)
 
 const bellerLabel = computed(() => {
   const map: Record<string, string> = { beller: 'Beller', beisser: 'Beisser', unclear: 'Unklar' }
