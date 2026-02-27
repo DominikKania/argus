@@ -55,10 +55,44 @@ class ChatResponse(BaseModel):
 
 
 def _build_extra_context(db, view: str, ticker: Optional[str]) -> str:
-    """Build additional context data based on the current view."""
+    """Build full context from all data sources, regardless of current view."""
     parts = []
 
-    if view == "kurse" and ticker:
+    # ── Offene Thesen (immer) ────────────────────────────────────────
+    theses = list(db.theses.find({"status": "open"}, {"_id": 0}))
+    if theses:
+        parts.append("\n## OFFENE THESEN")
+        for i, t in enumerate(theses, 1):
+            parts.append(f"\n### These {i}")
+            parts.append(f"Statement: {t.get('statement', '?')}")
+            if t.get("catalyst"):
+                parts.append(f"Katalysator: {t['catalyst']}")
+            if t.get("catalyst_date"):
+                parts.append(f"Katalysator-Datum: {t['catalyst_date']}")
+            if t.get("expected_if_positive"):
+                parts.append(f"Wenn positiv: {t['expected_if_positive']}")
+            if t.get("expected_if_negative"):
+                parts.append(f"Wenn negativ: {t['expected_if_negative']}")
+
+    # ── Research-Ergebnisse (immer) ──────────────────────────────────
+    researches = list(db.researches.find(
+        {"status": "completed"},
+        {"_id": 0, "title": 1, "relevance_summary": 1, "results": 1, "last_run_date": 1},
+    ))
+    if researches:
+        parts.append("\n## RESEARCH-ERGEBNISSE")
+        for r in researches:
+            parts.append(f"\n### {r.get('title', '?')}")
+            if r.get("relevance_summary"):
+                parts.append(f"Relevanz: {r['relevance_summary']}")
+            if r.get("results"):
+                preview = r["results"][:500]
+                if len(r["results"]) > 500:
+                    preview += "..."
+                parts.append(f"Ergebnis-Auszug: {preview}")
+
+    # ── Kursdaten (wenn Ticker ausgewählt) ───────────────────────────
+    if ticker:
         prices = list(
             db.prices.find(
                 {"ticker": ticker},
@@ -82,39 +116,17 @@ def _build_extra_context(db, view: str, ticker: Optional[str]) -> str:
                     line += f" (SMA50: {p['sma50']:.2f})"
                 parts.append(line)
 
-    if view == "thesen":
-        theses = list(db.theses.find({"status": "open"}, {"_id": 0}))
-        if theses:
-            parts.append("\n## OFFENE THESEN")
-            for i, t in enumerate(theses, 1):
-                parts.append(f"\n### These {i}")
-                parts.append(f"Statement: {t.get('statement', '?')}")
-                if t.get("catalyst"):
-                    parts.append(f"Katalysator: {t['catalyst']}")
-                if t.get("catalyst_date"):
-                    parts.append(f"Katalysator-Datum: {t['catalyst_date']}")
-                if t.get("expected_if_positive"):
-                    parts.append(f"Wenn positiv: {t['expected_if_positive']}")
-                if t.get("expected_if_negative"):
-                    parts.append(f"Wenn negativ: {t['expected_if_negative']}")
-
-    if view == "research":
-        researches = list(db.researches.find(
-            {"status": "completed"},
-            {"_id": 0, "title": 1, "relevance_summary": 1, "results": 1, "last_run_date": 1},
-        ))
-        if researches:
-            parts.append("\n## RESEARCH-ERGEBNISSE")
-            for r in researches:
-                parts.append(f"\n### {r.get('title', '?')}")
-                if r.get("relevance_summary"):
-                    parts.append(f"Relevanz: {r['relevance_summary']}")
-                if r.get("results"):
-                    # Include first 500 chars of results for context
-                    preview = r["results"][:500]
-                    if len(r["results"]) > 500:
-                        preview += "..."
-                    parts.append(f"Ergebnis-Auszug: {preview}")
+    # ── Markt-Kontext aus letzter Analyse (immer) ────────────────────
+    analysis = db.analyses.find_one(sort=[("date", -1)])
+    if analysis:
+        mctx = analysis.get("market_context")
+        if mctx:
+            notes = [(k.replace("_note", "").replace("_", " ").title(), v)
+                     for k, v in mctx.items() if v]
+            if notes:
+                parts.append("\n## MARKT-KONTEXT (aus letzter Analyse)")
+                for label, note in notes:
+                    parts.append(f"- **{label}:** {note}")
 
     return "\n".join(parts)
 
