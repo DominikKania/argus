@@ -13,3 +13,6 @@ frontend/dist/
 
 # Backend
 backend/__pycache__/
+
+# Screenshots
+screenshot_*.png
