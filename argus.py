@@ -75,6 +75,8 @@ def ensure_indexes(db):
     db.theses.create_index([("status", ASCENDING)])
     db.prices.create_index([("ticker", ASCENDING), ("date", ASCENDING)], unique=True)
     db.watchlist.create_index([("ticker", ASCENDING)], unique=True)
+    db.researches.create_index([("topic", ASCENDING)], unique=True)
+    db.researches.create_index([("status", ASCENDING)])
 
     # IWDA.AS als Default-Eintrag
     db.watchlist.update_one(
@@ -344,6 +346,155 @@ def cmd_transcribe(args):
 
     transcript = " ".join(full_text)
     print(transcript)
+
+
+def cmd_research(args):
+    from backend.llm import call_llm as api_call_llm
+
+    db = get_db()
+    ensure_indexes(db)
+
+    action = args.research_action or "list"
+
+    if action == "list":
+        docs = list(db.researches.find({}, {"results": 0}).sort("updated_date", -1))
+        if not docs:
+            print("Keine Research-Themen vorhanden.")
+            return
+        print(f"\n{'Topic':<30} {'Status':<12} {'Erstellt':<12} {'Letzter Lauf'}")
+        print("-" * 70)
+        for doc in docs:
+            last_run = doc.get("last_run_date") or "-"
+            print(f"{doc['title'][:28]:<30} {doc['status']:<12} {doc['created_date']:<12} {last_run}")
+        print()
+
+    elif action == "add":
+        import re as re_mod
+        title = args.title
+        slug = title.lower()
+        for char, repl in {"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"}.items():
+            slug = slug.replace(char, repl)
+        slug = re_mod.sub(r"[^a-z0-9]+", "-", slug).strip("-")
+
+        existing = db.researches.find_one({"topic": slug})
+        if existing:
+            print(f"Fehler: Topic '{slug}' existiert bereits.", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"Generiere Prompt für '{title}'...")
+        from backend.routers.research import PROMPT_HELPER_SYSTEM
+        try:
+            prompt = api_call_llm(
+                PROMPT_HELPER_SYSTEM,
+                [{"role": "user", "content": f"Erstelle einen Research-Prompt zum Thema: {title}"}],
+            )
+        except Exception as e:
+            print(f"Fehler bei Prompt-Generierung: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"\n--- Generierter Prompt ---\n{prompt}\n--- Ende ---\n")
+
+        now = datetime.now().strftime("%Y-%m-%d")
+        doc = {
+            "topic": slug,
+            "title": title,
+            "prompt": prompt,
+            "status": "ready",
+            "results": None,
+            "relevance_summary": None,
+            "error_message": None,
+            "created_date": now,
+            "updated_date": now,
+            "last_run_date": None,
+        }
+        db.researches.insert_one(doc)
+        print(f"Research-Topic '{title}' (slug: {slug}) erstellt.")
+
+    elif action == "run":
+        topic_slug = args.topic
+        doc = db.researches.find_one({"topic": topic_slug})
+        if not doc:
+            print(f"Fehler: Topic '{topic_slug}' nicht gefunden.", file=sys.stderr)
+            sys.exit(1)
+
+        if not doc.get("prompt", "").strip():
+            print("Fehler: Kein Prompt definiert.", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"Starte Research für '{doc['title']}'...")
+        db.researches.update_one({"_id": doc["_id"]}, {"$set": {"status": "running"}})
+
+        # Marktkontext laden
+        analysis = db.analyses.find_one(sort=[("date", -1)])
+        market_context = ""
+        if analysis:
+            analysis.pop("_id", None)
+            analysis.pop("simplified", None)
+            market_context = (
+                "\n\n## AKTUELLER MARKTKONTEXT\n"
+                + json.dumps(analysis, ensure_ascii=False, indent=2, default=str)
+            )
+
+        from backend.routers.research import RESEARCH_SYSTEM_PROMPT, _extract_relevance_summary
+        try:
+            results = api_call_llm(
+                RESEARCH_SYSTEM_PROMPT,
+                [{"role": "user", "content": doc["prompt"] + market_context}],
+            )
+        except Exception as e:
+            db.researches.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"status": "error", "error_message": str(e)}},
+            )
+            print(f"Fehler: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        relevance = _extract_relevance_summary(results)
+        now = datetime.now().strftime("%Y-%m-%d")
+        db.researches.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {
+                "status": "completed",
+                "results": results,
+                "relevance_summary": relevance,
+                "error_message": None,
+                "updated_date": now,
+                "last_run_date": now,
+            }},
+        )
+        print(f"Research abgeschlossen für '{doc['title']}'.")
+        if relevance:
+            print(f"Relevanz: {relevance}")
+
+    elif action == "show":
+        topic_slug = args.topic
+        doc = db.researches.find_one({"topic": topic_slug})
+        if not doc:
+            print(f"Fehler: Topic '{topic_slug}' nicht gefunden.", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"\n{'='*60}")
+        print(f"  {doc['title']} ({doc['status']})")
+        print(f"{'='*60}")
+        print(f"\nPrompt:\n{doc['prompt']}")
+        if doc.get("results"):
+            print(f"\n{'─'*60}")
+            print(f"Ergebnis ({doc.get('last_run_date', '?')}):\n")
+            print(doc["results"])
+        if doc.get("relevance_summary"):
+            print(f"\nRelevanz: {doc['relevance_summary']}")
+        if doc.get("error_message"):
+            print(f"\nFehler: {doc['error_message']}")
+        print()
+
+    elif action == "delete":
+        topic_slug = args.topic
+        result = db.researches.delete_one({"topic": topic_slug})
+        if result.deleted_count:
+            print(f"Topic '{topic_slug}' gelöscht.")
+        else:
+            print(f"Fehler: Topic '{topic_slug}' nicht gefunden.", file=sys.stderr)
+            sys.exit(1)
 
 
 def cmd_auto_ampel(args):
@@ -739,6 +890,19 @@ def main():
                          help="Whisper-Modell (Default: base)")
     p_trans.add_argument("--language", default="de", help="Sprache (Default: de)")
 
+    # research
+    p_research = sub.add_parser("research", help="Deep Research verwalten")
+    rs_sub = p_research.add_subparsers(dest="research_action")
+    rs_sub.add_parser("list", help="Alle Research-Themen anzeigen")
+    p_rs_add = rs_sub.add_parser("add", help="Neues Research-Thema erstellen")
+    p_rs_add.add_argument("title", help="Titel des Themas (z.B. 'Trump Zollpolitik')")
+    p_rs_run = rs_sub.add_parser("run", help="Research ausführen")
+    p_rs_run.add_argument("topic", help="Topic-Slug")
+    p_rs_show = rs_sub.add_parser("show", help="Research-Ergebnis anzeigen")
+    p_rs_show.add_argument("topic", help="Topic-Slug")
+    p_rs_del = rs_sub.add_parser("delete", help="Research-Thema löschen")
+    p_rs_del.add_argument("topic", help="Topic-Slug")
+
     # auto-ampel
     p_auto = sub.add_parser("auto-ampel", help="Vollautomatische Ampel-Analyse durchf\u00fchren")
     p_auto.add_argument("--cpi", type=float, help="CPI-Wert \u00fcberschreiben (z.B. bei neuer Ver\u00f6ffentlichung)")
@@ -788,6 +952,7 @@ def main():
         "watchlist": cmd_watchlist,
         "fetch": cmd_fetch,
         "prices": cmd_prices,
+        "research": cmd_research,
     }
 
     commands[args.command](args)

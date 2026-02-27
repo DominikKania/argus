@@ -25,7 +25,13 @@
 
     <!-- Data -->
     <template v-else>
-      <h1 class="page-title">Kurse</h1>
+      <div class="page-header">
+        <h1 class="page-title">Kurse</h1>
+        <button class="chat-trigger-btn" v-tooltip.left="'Frag den Tutor'" @click="askAbout">
+          <i class="pi pi-comments" />
+          <span>Fragen?</span>
+        </button>
+      </div>
 
       <!-- Ticker Selector -->
       <div class="ticker-bar">
@@ -108,6 +114,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch, nextTick } from 'vue'
 import { usePricesStore } from '@/stores/pricesStore'
+import { useChatStore } from '@/stores/chatStore'
 import { Chart, registerables } from 'chart.js'
 import type { PriceEntry } from '@/types/prices'
 import Skeleton from 'primevue/skeleton'
@@ -116,6 +123,16 @@ import Button from 'primevue/button'
 Chart.register(...registerables)
 
 const pricesStore = usePricesStore()
+const chatStore = useChatStore()
+
+function askAbout() {
+  const ticker = pricesStore.selectedTicker
+  const latest = pricesStore.prices[pricesStore.prices.length - 1]
+  const price = latest?.close ? `bei ${latest.close.toFixed(2)}€` : ''
+  chatStore.openWithContext(
+    `Erkläre mir den Kursverlauf von ${ticker} ${price} — wie steht es um den Trend?`
+  )
+}
 const chartCanvas = ref<HTMLCanvasElement | null>(null)
 let chartInstance: Chart | null = null
 
@@ -295,11 +312,40 @@ onMounted(() => {
   }
 }
 
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
 .page-title {
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--p-text-color);
-  margin: 0 0 1.5rem 0;
+  margin: 0;
+}
+
+.chat-trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--p-surface-border);
+  background: var(--p-surface-card);
+  color: var(--p-text-color-secondary);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    border-color: var(--p-primary-500);
+    color: var(--p-primary-500);
+  }
+
+  i { font-size: 0.875rem; }
 }
 
 // Ticker Bar

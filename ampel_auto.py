@@ -167,7 +167,7 @@ REGELN:
 """
 
 
-def build_user_prompt(market, mech_signals, mech_score, history, theses):
+def build_user_prompt(market, mech_signals, mech_score, history, theses, researches=None):
     """Baut den User-Prompt mit aktuellen Daten zusammen."""
     vix = market["vix"]
     yld = market["yields"]
@@ -225,6 +225,15 @@ def build_user_prompt(market, mech_signals, mech_score, history, theses):
             if t.get("catalyst_date"):
                 cat_info = f" (Katalysator: {t['catalyst_date']})"
             lines.append(f"- [{t['created_date']}] {t['statement']}{cat_info}")
+
+    # Research-Kontext
+    if researches:
+        lines.append("")
+        lines.append("## RESEARCH-KONTEXT")
+        lines.append("Folgende Deep-Research-Ergebnisse liegen vor und sollten in die Analyse einfließen:")
+        for r in researches:
+            summary = r.get("relevance_summary") or "Keine Zusammenfassung verfügbar"
+            lines.append(f"- **{r['title']}**: {summary}")
 
     return "\n".join(lines)
 
@@ -440,13 +449,17 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
     # 2. Mechanische Signale berechnen
     mech_signals, mech_score = calculate_mechanical_signals(market)
 
-    # 3. Verlauf + Thesen aus DB laden
+    # 3. Verlauf + Thesen + Researches aus DB laden
     history = list(db.analyses.find(sort=[("date", -1)]).limit(5))
     theses = list(db.theses.find({"status": "open"}).sort("created_date", -1))
+    researches = list(db.researches.find(
+        {"status": "completed", "relevance_summary": {"$ne": None}},
+        {"results": 0},
+    ))
 
     # 4. Claude API aufrufen
     print("Rufe LLM für Kontextanalyse auf...")
-    user_prompt = build_user_prompt(market, mech_signals, mech_score, history, theses)
+    user_prompt = build_user_prompt(market, mech_signals, mech_score, history, theses, researches)
     llm_text = call_llm(SYSTEM_PROMPT, user_prompt)
 
     # 5. JSON parsen

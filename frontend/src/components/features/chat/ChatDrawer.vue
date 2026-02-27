@@ -28,11 +28,8 @@
         <div class="welcome-icon">
           <i class="pi pi-sparkles" />
         </div>
-        <h3 class="welcome-title">Hallo! Ich bin dein Trading-Tutor.</h3>
-        <p class="welcome-text">
-          Frag mich alles zur aktuellen Analyse — ich erkläre Begriffe,
-          Zusammenhänge und was die Daten für dich bedeuten.
-        </p>
+        <h3 class="welcome-title">{{ welcomeTitle }}</h3>
+        <p class="welcome-text">{{ welcomeText }}</p>
         <div class="suggestions">
           <button
             v-for="s in suggestions"
@@ -96,22 +93,192 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import Drawer from 'primevue/drawer'
 import Button from 'primevue/button'
 import { useChatStore } from '@/stores/chatStore'
+import { useAmpelStore } from '@/stores/ampelStore'
+import { usePricesStore } from '@/stores/pricesStore'
+import { useResearchStore } from '@/stores/researchStore'
 
 const chatStore = useChatStore()
+const ampelStore = useAmpelStore()
+const pricesStore = usePricesStore()
+const researchStore = useResearchStore()
+const route = useRoute()
 const inputText = ref('')
 const chatBody = ref<HTMLElement>()
 const inputEl = ref<HTMLTextAreaElement>()
 
-const suggestions = [
-  'Was bedeutet die Ampel-Bewertung?',
-  'Erkläre mir den VIX',
-  'Was ist ein Golden Cross?',
-  'Wie sicher ist mein ETF gerade?',
-]
+// Track current view
+watch(() => route.name, (name) => {
+  if (name && typeof name === 'string') {
+    chatStore.setView(name)
+  }
+}, { immediate: true })
+
+watch(() => pricesStore.selectedTicker, (ticker) => {
+  chatStore.setTicker(ticker || null)
+}, { immediate: true })
+
+// Rating labels
+const ratingLabels: Record<string, string> = {
+  GREEN: 'GRÜN',
+  GREEN_FRAGILE: 'GRÜN (fragil)',
+  YELLOW: 'GELB',
+  YELLOW_BEARISH: 'GELB (bärisch)',
+  RED: 'ROT',
+  RED_CAPITULATION: 'ROT (Kapitulation)',
+}
+
+const actionLabels: Record<string, string> = {
+  hold: 'Halten',
+  buy: 'Kaufen',
+  partial_sell: 'Teilverkauf',
+  hedge: 'Absichern',
+  wait: 'Abwarten',
+}
+
+// Dynamic welcome text per view
+const welcomeTitle = computed(() => {
+  const view = chatStore.currentView
+  if (view === 'kurse') return `Frag mich zu ${pricesStore.selectedTicker || 'Kursen'}!`
+  if (view === 'thesen') return 'Frag mich zu deinen Thesen!'
+  if (view === 'ampel') return 'Frag mich zur Ampel-Analyse!'
+  if (view === 'research') return 'Frag mich zu deinem Research!'
+  return 'Hallo! Ich bin dein Trading-Tutor.'
+})
+
+const welcomeText = computed(() => {
+  const view = chatStore.currentView
+  if (view === 'kurse') {
+    return 'Ich erkläre dir den Kursverlauf, technische Indikatoren und was die Zahlen bedeuten.'
+  }
+  if (view === 'thesen') {
+    return 'Ich erkläre dir die offenen Thesen, Katalysatoren und Szenarien.'
+  }
+  if (view === 'ampel') {
+    return 'Ich erkläre dir die Signale, Marktdaten und was sie für dein Portfolio bedeuten.'
+  }
+  if (view === 'research') {
+    return 'Ich erkläre dir die Research-Ergebnisse und was sie für dein Portfolio bedeuten.'
+  }
+  return 'Frag mich alles zur aktuellen Analyse — ich erkläre Begriffe, Zusammenhänge und was die Daten für dich bedeuten.'
+})
+
+// Dynamic suggestions based on current view + real data
+const suggestions = computed(() => {
+  const view = chatStore.currentView
+  const analysis = ampelStore.latestAnalysis
+
+  if (view === 'ampel' && analysis) {
+    const rating = ratingLabels[analysis.rating?.overall] || analysis.rating?.overall
+    const vix = analysis.market?.vix?.value
+    const firstEvent = analysis.sentiment_events?.[0]
+    const items: string[] = []
+
+    items.push(`Warum ist die Ampel ${rating}?`)
+    if (vix) items.push(`Erkläre mir den VIX bei ${vix.toFixed(1)}`)
+    if (firstEvent) {
+      const headline = firstEvent.headline.length > 50
+        ? firstEvent.headline.slice(0, 47) + '...'
+        : firstEvent.headline
+      items.push(`${headline} — was bedeutet das?`)
+    }
+    if (analysis.market?.golden_cross) {
+      items.push('Was bedeutet das Golden Cross?')
+    } else {
+      items.push('Warum gibt es kein Golden Cross?')
+    }
+    return items
+  }
+
+  if (view === 'kurse') {
+    const ticker = pricesStore.selectedTicker || 'IWDA.AS'
+    const latest = pricesStore.prices?.[pricesStore.prices.length - 1]
+    const items: string[] = []
+
+    if (latest?.close) {
+      items.push(`Wie steht ${ticker} bei ${latest.close.toFixed(2)}€?`)
+    } else {
+      items.push(`Wie steht ${ticker} gerade?`)
+    }
+    items.push(`Was bedeutet der SMA 50 für ${ticker}?`)
+    if (latest?.close && latest?.sma50) {
+      const above = latest.close > latest.sma50
+      items.push(above
+        ? `${ticker} ist über dem SMA 50 — ist das gut?`
+        : `${ticker} ist unter dem SMA 50 — muss ich mir Sorgen machen?`
+      )
+    } else {
+      items.push(`Ist ${ticker} gerade über- oder unterbewertet?`)
+    }
+    items.push('Erkläre mir den Kursverlauf')
+    return items
+  }
+
+  if (view === 'thesen') {
+    const theses = ampelStore.theses
+    const items: string[] = []
+
+    if (theses.length > 0) {
+      const first = theses[0]
+      const stmt = first.statement.length > 60
+        ? first.statement.slice(0, 57) + '...'
+        : first.statement
+      items.push(`Erkläre mir: ${stmt}`)
+      if (first.catalyst) {
+        items.push(`Was passiert wenn "${first.catalyst}" eintritt?`)
+      }
+    }
+    items.push('Welche Risiken sehe ich bei meinen Thesen?')
+    if (theses.length > 1) {
+      items.push('Wie hängen meine Thesen zusammen?')
+    } else {
+      items.push('Was ist eine Investment-These?')
+    }
+    return items.slice(0, 4)
+  }
+
+  if (view === 'research') {
+    const topics = researchStore.topics
+    const items: string[] = []
+
+    if (researchStore.selectedTopic) {
+      const t = researchStore.selectedTopic
+      const title = t.title.length > 40 ? t.title.slice(0, 37) + '...' : t.title
+      items.push(`Erkläre mir: ${title}`)
+      if (t.relevance_summary) {
+        items.push(`Was bedeutet "${t.relevance_summary.slice(0, 50)}..." für mein Portfolio?`)
+      }
+    }
+    if (topics.length > 1) {
+      items.push('Wie hängen meine Research-Themen zusammen?')
+    }
+    items.push('Welche Risiken ergeben sich aus meinem Research?')
+    return items.slice(0, 4)
+  }
+
+  // Dashboard (default)
+  if (analysis) {
+    const rating = ratingLabels[analysis.rating?.overall] || 'die Ampel'
+    const action = actionLabels[analysis.recommendation?.action] || ''
+    return [
+      `Was bedeutet ${rating} für mich?`,
+      action ? `Erkläre mir die Empfehlung: ${action}` : 'Was ist die aktuelle Empfehlung?',
+      'Wie steht mein ETF gerade?',
+      'Worauf sollte ich als nächstes achten?',
+    ]
+  }
+
+  return [
+    'Was bedeutet die Ampel-Bewertung?',
+    'Erkläre mir den VIX',
+    'Was ist ein Golden Cross?',
+    'Wie sicher ist mein ETF gerade?',
+  ]
+})
 
 function send() {
   if (!inputText.value.trim() || chatStore.isLoading) return
@@ -254,6 +421,7 @@ watch(() => chatStore.isOpen, (open) => {
   cursor: pointer;
   transition: all 0.15s;
   font-family: inherit;
+  text-align: left;
 
   &:hover {
     border-color: var(--p-primary-500);

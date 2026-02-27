@@ -13,6 +13,16 @@ export const useChatStore = defineStore('chat', () => {
   const isOpen = ref(false)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+  const currentView = ref('dashboard')
+  const currentTicker = ref<string | null>(null)
+
+  function setView(view: string) {
+    currentView.value = view
+  }
+
+  function setTicker(ticker: string | null) {
+    currentTicker.value = ticker
+  }
 
   function toggleChat() {
     isOpen.value = !isOpen.value
@@ -49,6 +59,10 @@ export const useChatStore = defineStore('chat', () => {
         {
           message: userMessage.trim(),
           history,
+          context: {
+            view: currentView.value,
+            ticker: currentTicker.value,
+          },
         }
       )
 
@@ -72,6 +86,10 @@ export const useChatStore = defineStore('chat', () => {
     isOpen,
     isLoading,
     error,
+    currentView,
+    currentTicker,
+    setView,
+    setTicker,
     toggleChat,
     openChat,
     closeChat,

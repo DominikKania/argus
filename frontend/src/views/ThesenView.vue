@@ -30,7 +30,12 @@
 
       <div class="theses-grid">
         <div v-for="thesis in ampelStore.theses" :key="thesis._id" class="thesis-card">
-          <p class="thesis-statement">{{ thesis.statement }}</p>
+          <div class="thesis-header">
+            <p class="thesis-statement">{{ thesis.statement }}</p>
+            <button class="chat-trigger" v-tooltip.top="'Frag den Tutor'" @click="askAbout(thesis)">
+              <i class="pi pi-comments" />
+            </button>
+          </div>
 
           <div v-if="thesis.catalyst" class="catalyst">
             <span class="catalyst-label">Katalysator:</span>
@@ -73,10 +78,19 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useAmpelStore } from '@/stores/ampelStore'
+import { useChatStore } from '@/stores/chatStore'
+import type { OpenThesis } from '@/types/ampel'
 import Skeleton from 'primevue/skeleton'
 import Button from 'primevue/button'
 
 const ampelStore = useAmpelStore()
+const chatStore = useChatStore()
+
+function askAbout(thesis: OpenThesis) {
+  chatStore.openWithContext(
+    `Erkläre mir diese These: ${thesis.statement}${thesis.catalyst ? ' (Katalysator: ' + thesis.catalyst + ')' : ''}`
+  )
+}
 
 const daysUntil = (dateStr: string): number => {
   const now = new Date()
@@ -140,12 +154,35 @@ onMounted(() => {
   gap: 0.75rem;
 }
 
+.thesis-header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
 .thesis-statement {
   font-size: 0.9375rem;
   font-weight: 500;
   line-height: 1.5;
   color: var(--p-text-color);
   margin: 0;
+  flex: 1;
+}
+
+.chat-trigger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  color: var(--p-text-color-secondary);
+  opacity: 0;
+  transition: all 0.15s;
+  font-size: 0.875rem;
+  flex-shrink: 0;
+
+  .thesis-card:hover & { opacity: 0.6; }
+  &:hover { opacity: 1 !important; color: var(--p-primary-500); background: var(--p-surface-ground); }
 }
 
 .catalyst {

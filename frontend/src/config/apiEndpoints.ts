@@ -10,4 +10,13 @@ export const API_ENDPOINTS = {
     TICKER: (ticker: string, days = 30) => `/prices/${ticker}?days=${days}`,
   },
   CHAT: '/chat/',
+  RESEARCH: {
+    LIST: '/research/',
+    DETAIL: (id: string) => `/research/${id}`,
+    CREATE: '/research/',
+    UPDATE: (id: string) => `/research/${id}`,
+    RUN: (id: string) => `/research/${id}/run`,
+    DELETE: (id: string) => `/research/${id}`,
+    GENERATE_PROMPT: '/research/generate-prompt',
+  },
 } as const
