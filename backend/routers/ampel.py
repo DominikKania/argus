@@ -118,6 +118,8 @@ def get_prompts():
     if not analysis:
         raise HTTPException(status_code=404, detail="Keine Analyse vorhanden")
 
+    today = datetime.now().strftime("%Y-%m-%d")
+
     market = analysis.get("market", {})
     signals, score = calculate_mechanical_signals(market)
 
@@ -127,11 +129,16 @@ def get_prompts():
         {"status": "completed", "relevance_summary": {"$ne": None}},
         {"results": 0, "_id": 0},
     ))
-    news_results = list(
-        db.news_results.find(
-            {"date": analysis["date"]}, {"raw_headlines": 0, "_id": 0}
-        )
-    )
+    # Neueste News pro Topic (nicht nur Analyse-Datum)
+    news_results = []
+    seen_topics = set()
+    for nr in db.news_results.find(
+        {}, {"raw_headlines": 0, "_id": 0}
+    ).sort("date", -1):
+        topic = nr.get("topic", "")
+        if topic not in seen_topics:
+            seen_topics.add(topic)
+            news_results.append(nr)
 
     user_prompt = build_user_prompt(
         market, signals, score, history, theses, researches, news_results
