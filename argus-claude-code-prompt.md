@@ -60,8 +60,6 @@ Wir fangen simpel an und bauen aus.
     "reasoning": "3/4 mechanisch grün, aber Trend-Puffer minimal"
   },
 
-  "beller_check": null,
-
   "sentiment_events": [
     {
       "headline": "Software-Sektor Selloff beschleunigt sich",

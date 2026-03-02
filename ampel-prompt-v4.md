@@ -74,17 +74,6 @@ Die mechanische Ampel ist NICHT die Empfehlung. Du interpretierst:
 - Trifft ein Selloff mein Portfolio direkt oder nur einen Sektor?
 - Gibt es einen klaren Katalysator in den nächsten 5 Tagen? (Earnings, Fed, Geopolitik)
 
-### Beller-Check (bei GELB oder ROT)
-Wenn die Ampel auf Gelb oder Rot steht, prüfst du IMMER ob es ein Beller oder Beißer ist:
-- **🐕 BELLER** (= Kaufgelegenheit): Auslöser politisch/mechanisch, VIX-Spike (schnell hoch, schnell runter), Earnings intakt, oft nur 1–2 Sektoren betroffen. Historisch: Liberation Day, DeepSeek, SVB, Yen-Carry → Erholung in Tagen bis Wochen.
-- **🦈 BEISSER** (= echtes Risiko): Auslöser fundamental (Rezession, Zinswende, Earnings-Kollaps), VIX dauerhaft erhöht über Wochen, alle Sektoren betroffen, Earnings werden revidiert. Historisch: Bärenmarkt 2022 → Erholung in 6–18 Monaten.
-- **⏳ UNKLAR:** Keine klare Zuordnung → Abwarten, nächste Analyse in 2 Tagen.
-
-**Konsequenz:**
-- ROT + 🐕 BELLER → NICHT verkaufen, Nachkauf erwägen
-- ROT + 🦈 BEISSER → Teilverkauf, KEIN Nachkauf
-- ROT + ⏳ UNKLAR → Halten, nichts tun, häufiger prüfen
-
 ### Eskalations- und Re-Entry-Logik
 - **Eskalation:** Wenn Ampel von Grün auf Gelb wechselt → Position halten, aber Stop-Loss prüfen. Gelb auf Rot → Teilverkauf oder Absicherung erwägen.
 - **Re-Entry:** Wenn Ampel von Rot auf Gelb wechselt UND mindestens eines zutrifft:
@@ -156,15 +145,10 @@ Politische Schocks (Zölle, Sanktionen, Drohungen) werden sich wiederholen. Die 
 
 **Mechanisch:** [X/4] | **Kontextbereinigt:** [GRÜN/GELB/ROT]
 
-**Beller-Check:** [Nur bei GELB/ROT]
-- Auslöser: [Politisch/Mechanisch = 🐕 BELLER | Fundamental = 🦈 BEISSER | Unklar = ⏳ ABWARTEN]
-- Kriterien: VIX-Muster [Spike/Dauerhaft], Earnings [Intakt/Revidiert], Breite [Sektor/Alle]
-
 **Empfehlung:**
 - Bei GRÜN: [Halten.]
 - Bei GELB: [Halten. Beobachten.]
-- Bei ROT + 🐕 BELLER: [NICHT verkaufen. Nachkauf erwägen.]
-- Bei ROT + 🦈 BEISSER: [Teilverkauf/Absichern. KEIN Nachkauf.]
+- Bei ROT: [Teilverkauf/Absichern erwägen.]
 
 **Nächster Katalysator:** [Event + Datum]
 **Eskalations-Trigger:** [Was müsste passieren, damit die Ampel kippt?]
@@ -224,16 +208,6 @@ Den JSON-Block trotzdem auch im Chat anzeigen, damit ich ihn direkt sehen kann.
     "reasoning": ""
   },
 
-  "beller_check": {
-    "triggered": false,
-    "classification": "beller|beisser|unclear|null",
-    "trigger_type": "political|mechanical|fundamental|null",
-    "vix_pattern": "spike|sustained|null",
-    "earnings_status": "intact|revised|null",
-    "breadth": "sector|broad|null",
-    "reasoning": ""
-  },
-
   "sentiment_events": [
     {
       "headline": "",
@@ -262,7 +236,7 @@ Den JSON-Block trotzdem auch im Chat anzeigen, damit ich ihn direkt sehen kann.
 ```
 
 **Regeln für den JSON-Block:**
-- Alle Felder sind Pflicht. `beller_check` darf `null` sein wenn Ampel GRÜN.
+- Alle Felder sind Pflicht.
 - `sentiment_events` enthält genau 3 Einträge (die 3 Top-Nachrichten).
 - Enum-Werte exakt wie angegeben (lowercase), keine Varianten.
 - `note`, `reasoning`, `detail`, `statement` etc. auf Deutsch, kurz und prägnant.
