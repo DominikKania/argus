@@ -367,12 +367,17 @@ spezifischen Teilaspekt einer größeren Research.
 
 ## PORTFOLIO-KONTEXT
 Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+Der MSCI World umfasst ~1.400 Aktien aus 23 Industrieländern, gewichtet: USA ~70%, \
+Tech ~23%, Financials ~15%, Healthcare ~12%. Jede Analyse muss auf dieses spezifische \
+ETF bezogen sein.
 
 ## REGELN
 - Schreibe NUR über den zugewiesenen Teilaspekt
 - Alle Texte auf Deutsch
 - Faktenbasiert, konkret: Nenne Zahlen, Daten, Zeiträume
-- Beziehe den Portfolio-Kontext ein
+- JEDER Absatz muss den konkreten Impact auf den MSCI World ETF herausarbeiten
+- Keine allgemeinen Abhandlungen — immer fragen: "Was bedeutet das für IWDA?"
+- Quantifiziere wo möglich: Welche Sektoren (% im IWDA), welche Länder, welche Größenordnung
 - Strukturiere mit Markdown (### für Unterabschnitte)
 - KEIN Fazit, KEINE Zusammenfassung — das kommt separat
 - HINWEIS: Du hast keinen Web-Zugang. Analysiere basierend auf deinem aktuellen Wissen."""
@@ -383,34 +388,41 @@ mehrerer Teilanalysen und erstellst daraus eine Gesamtsynthese.
 
 ## PORTFOLIO-KONTEXT
 Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+Der MSCI World umfasst ~1.400 Aktien aus 23 Industrieländern, gewichtet: USA ~70%, \
+Tech ~23%, Financials ~15%, Healthcare ~12%.
 
 ## AUSGABE-FORMAT
 Erstelle die finale Synthese im Markdown-Format:
 
 ### Gesamtbewertung
-Übergreifende Einschätzung (3-5 Sätze)
+Übergreifende Einschätzung für den MSCI World ETF (3-5 Sätze). Was ist der Netto-Effekt?
 
-### Portfolio-Auswirkungen
-Konkrete Netto-Effekte auf den MSCI World ETF
+### IWDA-Impact nach Kanal
+Für jeden relevanten Wirkungskanal (z.B. Sektoren, Regionen, Währung, Zinsen, Sentiment):
+- Welcher Anteil im IWDA ist betroffen (% Gewichtung)?
+- Richtung und geschätzte Größenordnung des Effekts
+- Zeithorizont
 
 ### Szenarien
-- **Positives Szenario:** ...
-- **Negatives Szenario:** ...
+- **Positives Szenario:** Konkreter IWDA-Effekt (z.B. "+2-3% durch...")
+- **Negatives Szenario:** Konkreter IWDA-Effekt (z.B. "-5% falls...")
 - **Wahrscheinlichstes Szenario:** ...
 
 ### Beobachtungspunkte
-Top 5-7 Indikatoren die der Anleger beobachten sollte
+Top 5-7 Indikatoren die der Anleger beobachten sollte — jeweils mit konkretem Schwellwert
 
 ### Fazit
-Handlungsempfehlung
+Handlungsempfehlung für den IWDA-Anleger
 
-**Relevanz-Zusammenfassung:** Ein einzelner Satz der die Kernaussage für die Ampel-Analyse zusammenfasst.
+**Relevanz-Zusammenfassung:** Ein einzelner Satz der die Kernaussage für die Ampel-Analyse \
+zusammenfasst. Muss den IWDA-Impact quantifizieren.
 
 ## REGELN
 - Alle Texte auf Deutsch
 - Vermeide Wiederholungen aus den Teilanalysen
-- Fokus auf Querverbindungen und Netto-Effekte
-- Sei konkret mit Zahlen und Zeiträumen"""
+- Fokus auf Querverbindungen und Netto-Effekte AUF DEN IWDA
+- Sei konkret mit Zahlen und Zeiträumen
+- Keine allgemeinen Wirtschaftsanalysen — immer die Brücke zum IWDA schlagen"""
 
 
 def _parse_sections(raw: str) -> list[dict]:
