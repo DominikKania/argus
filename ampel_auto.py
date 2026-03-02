@@ -383,8 +383,17 @@ def build_user_prompt(market, mech_signals, mech_score, history, theses, researc
         lines.append("## RESEARCH-KONTEXT")
         lines.append("Folgende Deep-Research-Ergebnisse liegen vor und sollten in die Analyse einfließen:")
         for r in researches:
-            summary = r.get("relevance_summary") or "Keine Zusammenfassung verfügbar"
-            lines.append(f"- **{r['title']}**: {summary}")
+            lines.append(f"\n### {r['title']}")
+            summary = r.get("relevance_summary")
+            if summary:
+                lines.append(f"Relevanz für IWDA: {summary}")
+            results = r.get("results", "")
+            if results:
+                # Ersten 2000 Zeichen der Ergebnisse als Kontext
+                preview = results[:2000]
+                if len(results) > 2000:
+                    preview += "\n[... gekürzt]"
+                lines.append(f"Ergebnisse:\n{preview}")
 
     # News-Kontext (heute via RSS)
     if news_results:
@@ -640,7 +649,6 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
     theses = list(db.theses.find({"status": "open"}).sort("created_date", -1))
     researches = list(db.researches.find(
         {"status": "completed", "relevance_summary": {"$ne": None}},
-        {"results": 0},
     ))
     news_results = list(db.news_results.find(
         {"date": date_str},

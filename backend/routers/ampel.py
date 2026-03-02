@@ -127,7 +127,7 @@ def get_prompts():
     theses = list(db.theses.find({"status": "open"}, {"_id": 0}))
     researches = list(db.researches.find(
         {"status": "completed", "relevance_summary": {"$ne": None}},
-        {"results": 0, "_id": 0},
+        {"_id": 0},
     ))
     # Neueste News pro Topic (nicht nur Analyse-Datum)
     news_results = []
