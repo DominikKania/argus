@@ -457,11 +457,12 @@ def _run_orchestrated(prompt: str, market_context: str) -> str:
     if len(sections) < 2:
         # Fallback: single call if planner failed
         log.warning("Planner konnte Prompt nicht zerlegen — Fallback auf Single-Call.")
-        return call_llm(
+        result = call_llm(
             RESEARCH_SYSTEM_PROMPT,
             [{"role": "user", "content": prompt + market_context}],
             max_tokens=16384,
         )
+        return result, None  # no separate synthesis in single-call mode
 
     log.info("Orchestrated Research: %d Sektionen geplant.", len(sections))
 
@@ -497,7 +498,7 @@ def _run_orchestrated(prompt: str, market_context: str) -> str:
     final += combined
     final += f"\n\n---\n\n## Synthese & Fazit\n\n{synthesis}"
 
-    return final
+    return final, synthesis
 
 
 @router.post("/{id_or_slug}/run")
@@ -529,21 +530,23 @@ def run_research(id_or_slug: str):
                 + json.dumps(analysis, ensure_ascii=False, indent=2, default=str)
             )
 
-        results = _run_orchestrated(doc["prompt"], market_context)
+        results, synthesis = _run_orchestrated(doc["prompt"], market_context)
 
         relevance = _extract_relevance_summary(results)
         now = datetime.now().strftime("%Y-%m-%d")
 
+        update_fields = {
+            "status": "completed",
+            "results": results,
+            "synthesis": synthesis,
+            "relevance_summary": relevance,
+            "error_message": None,
+            "updated_date": now,
+            "last_run_date": now,
+        }
         db.researches.update_one(
             {"_id": doc["_id"]},
-            {"$set": {
-                "status": "completed",
-                "results": results,
-                "relevance_summary": relevance,
-                "error_message": None,
-                "updated_date": now,
-                "last_run_date": now,
-            }},
+            {"$set": update_fields},
         )
 
         updated = db.researches.find_one({"_id": doc["_id"]})

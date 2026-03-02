@@ -387,13 +387,17 @@ def build_user_prompt(market, mech_signals, mech_score, history, theses, researc
             summary = r.get("relevance_summary")
             if summary:
                 lines.append(f"Relevanz für IWDA: {summary}")
-            results = r.get("results", "")
-            if results:
-                # Ersten 2000 Zeichen der Ergebnisse als Kontext
-                preview = results[:2000]
-                if len(results) > 2000:
-                    preview += "\n[... gekürzt]"
-                lines.append(f"Ergebnisse:\n{preview}")
+            # Use synthesis (condensed expert summary) instead of raw results
+            synthesis = r.get("synthesis", "")
+            if not synthesis:
+                # Extract synthesis from results if not stored separately
+                results = r.get("results", "")
+                if results:
+                    idx = results.find("## Synthese & Fazit")
+                    if idx >= 0:
+                        synthesis = results[idx + len("## Synthese & Fazit"):].strip()
+            if synthesis:
+                lines.append(f"Synthese:\n{synthesis}")
 
     # News-Kontext (heute via RSS)
     if news_results:
