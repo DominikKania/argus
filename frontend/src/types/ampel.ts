@@ -117,16 +117,6 @@ export interface SentimentEvent {
   is_primary?: boolean
 }
 
-export interface BellerCheck {
-  triggered: boolean
-  classification?: string | null
-  trigger_type?: string | null
-  vix_pattern?: string | null
-  earnings_status?: string | null
-  breadth?: string | null
-  reasoning?: string
-}
-
 export interface Thesis {
   statement: string
   catalyst?: string
@@ -141,7 +131,6 @@ export interface SimplifiedTexts {
   escalation_trigger: string
   signal_notes: Record<string, string>
   sentiment_events: Array<{ headline: string; summary: string }>
-  beller_check_reasoning: string
   thesis?: {
     statement: string
     catalyst: string
@@ -163,7 +152,6 @@ export interface Analysis {
   signals: Record<string, Signal>
   rating: Rating
   recommendation: Recommendation
-  beller_check?: BellerCheck
   sentiment_events?: SentimentEvent[]
   thesis?: Thesis
   escalation_trigger?: string

@@ -101,11 +101,6 @@ Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6
 - Kaskadenrisiko bewerten: Kann es über den direkten Effekt hinaus eskalieren?
 - HINWEIS: Du hast keinen Web-Zugang. Bewerte basierend auf deinem aktuellen Marktwissen.
 
-## BELLER-CHECK (bei GELB/ROT)
-- 🐕 BELLER: Politisch/mechanisch, VIX-Spike, Earnings intakt → Erholung in Tagen/Wochen
-- 🦈 BEISSER: Fundamental, VIX dauerhaft erhöht, Earnings revidiert → 6-18 Monate
-- ⏳ UNKLAR: Keine klare Zuordnung → Abwarten
-
 ## OVERALL RATING
 - GREEN: 4/4 oder 3/4 mit stabilem Kontext
 - GREEN_FRAGILE: 3/4 mit Risikofaktoren (niedriger Puffer etc.)
@@ -177,15 +172,6 @@ Verwende exakt dieses Schema:
     "overall": "GREEN|GREEN_FRAGILE|YELLOW|YELLOW_BEARISH|RED|RED_CAPITULATION",
     "reasoning": "..."
   },
-  "beller_check": {
-    "triggered": false,
-    "classification": "beller|beisser|unclear|null",
-    "trigger_type": "political|mechanical|fundamental|null",
-    "vix_pattern": "spike|sustained|null",
-    "earnings_status": "intact|revised|null",
-    "breadth": "sector|broad|null",
-    "reasoning": ""
-  },
   "sentiment_events": [
     { "headline": "...", "summary": "...", "affects_portfolio": "direct|sector_only|indirect", "cascade_risk": "low|medium|high", "is_primary": true },
     { "headline": "...", "summary": "...", "affects_portfolio": "...", "cascade_risk": "...", "is_primary": false },
@@ -224,7 +210,6 @@ Stattdessen in einfachen Worten erklären (z.B. "US-Notfallzölle" statt "Sectio
 - Enum-Werte exakt wie angegeben (lowercase)
 - Zahlen ohne Einheiten
 - sentiment_events enthält genau 3 Einträge
-- beller_check.triggered=false und Felder auf null wenn Ampel GRÜN
 - thesis darf null sein wenn keine neue These sinnvoll ist
 - thesis: MAXIMALER Zeithorizont 4-6 Wochen! Keine Thesen über Monate hinweg. \
 Lieber einen konkreten nächsten Schritt testen (z.B. "Reagiert die EU bis Mitte März?") \
@@ -507,8 +492,6 @@ REGELN:
   - VIX = Angstbarometer der Börse (niedrig = ruhig, hoch = nervös)
   - Spread = Differenz zwischen zwei Zinssätzen
   - Stop-Loss = Kurs bei dem man verkauft um Verluste zu begrenzen
-  - Beller = kurzfristiger Schreck an der Börse, erholt sich schnell
-  - Beisser = ernstes Problem, dauert länger
   - Hedge = Absicherung gegen Verluste
   - CPI = Verbraucherpreisindex (misst die Inflation)
   - Real Yield = Realzins (Zins minus Inflation)
@@ -536,7 +519,6 @@ def simplify_analysis(analysis):
             {"headline": e.get("headline", ""), "summary": e.get("summary", "")}
             for e in analysis.get("sentiment_events", [])
         ],
-        "beller_check_reasoning": (analysis.get("beller_check") or {}).get("reasoning", "") or "",
     }
 
     thesis = analysis.get("thesis")
@@ -601,15 +583,6 @@ def merge_analysis(date_str, market, mech_signals, mech_score, llm_data):
             "overall": llm_rating.get("overall", "YELLOW"),
             "reasoning": llm_rating.get("reasoning", ""),
         },
-        "beller_check": llm_data.get("beller_check", {
-            "triggered": False,
-            "classification": None,
-            "trigger_type": None,
-            "vix_pattern": None,
-            "earnings_status": None,
-            "breadth": None,
-            "reasoning": "",
-        }),
         "sentiment_events": llm_data.get("sentiment_events", []),
         "recommendation": llm_data.get("recommendation", {"action": "hold", "detail": ""}),
         "thesis": llm_data.get("thesis"),

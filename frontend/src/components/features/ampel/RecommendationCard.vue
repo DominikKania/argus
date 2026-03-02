@@ -25,20 +25,6 @@
       <p class="escalation-text">{{ analysis.escalation_trigger }}</p>
     </div>
 
-    <div v-if="analysis.beller_check?.triggered" class="beller-check">
-      <h4 class="sub-title">Beller-Check</h4>
-      <div class="beller-info">
-        <span class="beller-badge" :class="bellerClass">
-          {{ bellerLabel }}
-        </span>
-        <span v-if="analysis.beller_check.trigger_type" class="beller-type">
-          {{ analysis.beller_check.trigger_type }}
-        </span>
-      </div>
-      <p v-if="analysis.beller_check.reasoning" class="beller-reasoning">
-        {{ analysis.beller_check.reasoning }}
-      </p>
-    </div>
   </div>
 </template>
 
@@ -59,16 +45,7 @@ function askAbout() {
   )
 }
 
-const bellerLabel = computed(() => {
-  const map: Record<string, string> = { beller: 'Beller', beisser: 'Beisser', unclear: 'Unklar' }
-  return map[props.analysis.beller_check?.classification || ''] || ''
-})
 
-const bellerClass = computed(() => ({
-  'beller-beller': props.analysis.beller_check?.classification === 'beller',
-  'beller-beisser': props.analysis.beller_check?.classification === 'beisser',
-  'beller-unclear': props.analysis.beller_check?.classification === 'unclear',
-}))
 </script>
 
 <style lang="scss" scoped>
@@ -118,7 +95,7 @@ const bellerClass = computed(() => ({
   margin: 0 0 0.5rem 0;
 }
 
-.detail-text, .reasoning-text, .escalation-text, .beller-reasoning {
+.detail-text, .reasoning-text, .escalation-text {
   font-size: 0.8125rem;
   line-height: 1.6;
   color: var(--p-text-color-secondary);
@@ -160,44 +137,5 @@ const bellerClass = computed(() => ({
   i { font-size: 0.8125rem; }
 }
 
-.beller-check {
-  padding: 0.75rem;
-  border-radius: 8px;
-  background: var(--p-surface-ground);
-}
 
-.beller-info {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.beller-badge {
-  font-size: 0.75rem;
-  font-weight: 700;
-  padding: 0.2rem 0.6rem;
-  border-radius: 6px;
-}
-
-.beller-beller {
-  background-color: rgba(16, 185, 129, 0.15);
-  color: #059669;
-  :root.dark & { background-color: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
-}
-.beller-beisser {
-  background-color: rgba(239, 68, 68, 0.15);
-  color: #dc2626;
-  :root.dark & { background-color: rgba(239, 68, 68, 0.2); color: #fca5a5; }
-}
-.beller-unclear {
-  background-color: rgba(245, 158, 11, 0.15);
-  color: #d97706;
-  :root.dark & { background-color: rgba(245, 158, 11, 0.2); color: #fcd34d; }
-}
-
-.beller-type {
-  font-size: 0.75rem;
-  color: var(--p-text-color-secondary);
-}
 </style>
