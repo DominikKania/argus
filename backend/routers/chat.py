@@ -124,6 +124,34 @@ def _build_extra_context(db, view: str, ticker: Optional[str]) -> str:
                     line += f" (SMA50: {p['sma50']:.2f})"
                 parts.append(line)
 
+    # ── News-Daten (immer) ───────────────────────────────────────────
+    news_results = list(
+        db.news_results.find(
+            {},
+            {"raw_headlines": 0, "_id": 0},
+        ).sort("date", -1).limit(10)
+    )
+    if news_results:
+        parts.append("\n## AKTUELLE NEWS-LAGE")
+        seen_topics = set()
+        for nr in news_results:
+            topic = nr.get("topic", "")
+            if topic in seen_topics:
+                continue
+            seen_topics.add(topic)
+
+            parts.append(f"\n### {topic} ({nr.get('date', '?')}) — Trend: {nr.get('trend', '?')}")
+            if nr.get("development"):
+                parts.append(f"Neue Entwicklung: {nr['development']}")
+            if nr.get("recurring"):
+                parts.append(f"Bestätigt sich: {nr['recurring']}")
+            if nr.get("summary"):
+                parts.append(f"Einordnung: {nr['summary']}")
+            if nr.get("triggers_detected"):
+                parts.append(f"Trigger: {', '.join(nr['triggers_detected'])}")
+            if nr.get("ampel_relevance"):
+                parts.append(f"Ampel-Relevanz: {nr['ampel_relevance']}")
+
     # ── Markt-Kontext aus letzter Analyse (immer) ────────────────────
     analysis = db.analyses.find_one(sort=[("date", -1)])
     if analysis:
@@ -265,7 +293,8 @@ def chat_stream(req: ChatRequest):
                 yield f"data: {escaped}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
-            log.error("Chat stream failed: %s", e)
+            import traceback
+            log.error("Chat stream failed: %s\n%s", e, traceback.format_exc())
             error_msg = json.dumps({"error": str(e)}, ensure_ascii=False)
             yield f"data: {error_msg}\n\n"
 

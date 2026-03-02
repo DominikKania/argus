@@ -59,13 +59,7 @@ export interface CreditSpread {
 }
 
 export interface MarketContext {
-  sector_rotation_note?: string
-  regional_note?: string
-  seasonality_note?: string
-  breadth_note?: string
-  put_call_note?: string
-  currency_note?: string
-  credit_spread_note?: string
+  [key: string]: string | undefined
 }
 
 export interface MarketData {
@@ -154,6 +148,11 @@ export interface SimplifiedTexts {
     expected_if_positive: string
     expected_if_negative: string
   }
+}
+
+export interface AnalysisPrompts {
+  system: string
+  user: string
 }
 
 export interface Analysis {

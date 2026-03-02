@@ -27,10 +27,25 @@
     <template v-else>
       <div class="page-header">
         <h1 class="page-title">Kurse</h1>
-        <button class="chat-trigger-btn" v-tooltip.left="'Frag den Tutor'" @click="askAbout">
-          <i class="pi pi-comments" />
-          <span>Fragen?</span>
-        </button>
+        <div class="header-actions">
+          <button
+            class="sync-btn"
+            :class="{ syncing: pricesStore.syncing }"
+            :disabled="pricesStore.syncing"
+            v-tooltip.left="'Fehlende Tage nachladen'"
+            @click="syncPrices"
+          >
+            <i class="pi pi-sync" :class="{ 'pi-spin': pricesStore.syncing }" />
+            <span>{{ pricesStore.syncing ? 'Sync...' : 'Aktualisieren' }}</span>
+          </button>
+          <span v-if="syncResult" class="sync-result" :class="syncResult.type">
+            {{ syncResult.text }}
+          </span>
+          <button class="chat-trigger-btn" v-tooltip.left="'Frag den Tutor'" @click="askAbout">
+            <i class="pi pi-comments" />
+            <span>Fragen?</span>
+          </button>
+        </div>
       </div>
 
       <!-- Ticker Selector -->
@@ -124,6 +139,24 @@ Chart.register(...registerables)
 
 const pricesStore = usePricesStore()
 const chatStore = useChatStore()
+
+const syncResult = ref<{ text: string; type: 'success' | 'error' } | null>(null)
+
+async function syncPrices() {
+  syncResult.value = null
+  try {
+    const result = await pricesStore.syncPrices()
+    const total = result.total_new_records
+    syncResult.value = {
+      text: total > 0 ? `+${total} Tage geladen` : 'Bereits aktuell',
+      type: 'success',
+    }
+    setTimeout(() => { syncResult.value = null }, 5000)
+  } catch {
+    syncResult.value = { text: 'Sync fehlgeschlagen', type: 'error' }
+    setTimeout(() => { syncResult.value = null }, 5000)
+  }
+}
 
 function askAbout() {
   const ticker = pricesStore.selectedTicker
@@ -324,6 +357,58 @@ onMounted(() => {
   font-weight: 700;
   color: var(--p-text-color);
   margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sync-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--p-surface-border);
+  background: var(--p-surface-card);
+  color: var(--p-text-color-secondary);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover:not(:disabled) {
+    border-color: var(--p-primary-500);
+    color: var(--p-primary-500);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  i { font-size: 0.875rem; }
+}
+
+.sync-result {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+
+  &.success {
+    color: #059669;
+    background: rgba(16, 185, 129, 0.12);
+    :root.dark & { color: #6ee7b7; background: rgba(16, 185, 129, 0.2); }
+  }
+
+  &.error {
+    color: #dc2626;
+    background: rgba(239, 68, 68, 0.12);
+    :root.dark & { color: #fca5a5; background: rgba(239, 68, 68, 0.2); }
+  }
 }
 
 .chat-trigger-btn {

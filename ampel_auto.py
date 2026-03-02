@@ -303,6 +303,33 @@ def build_user_prompt(market, mech_signals, mech_score, history, theses, researc
         lines.append(f"- 1-Monats-Veränderung: {eur['change_1m_pct']:+.2f}%")
         lines.append(f"- Richtung: {eur['direction']} ({dir_label})")
 
+    # Öl (Brent)
+    oil = market.get("oil")
+    if oil:
+        lines.append("")
+        lines.append("## ÖL (Brent Crude)")
+        lines.append(f"- Preis: ${oil['price']}")
+        lines.append(f"- 1-Monats-Veränderung: {oil['change_1m_pct']:+.2f}%")
+        lines.append(f"- Richtung: {oil['direction']}")
+
+    # Gold
+    gold = market.get("gold")
+    if gold:
+        lines.append("")
+        lines.append("## GOLD")
+        lines.append(f"- Preis: ${gold['price']}")
+        lines.append(f"- 1-Monats-Veränderung: {gold['change_1m_pct']:+.2f}%")
+        lines.append(f"- Richtung: {gold['direction']}")
+
+    # US Dollar Index
+    dxy = market.get("dxy")
+    if dxy:
+        lines.append("")
+        lines.append("## US DOLLAR INDEX (DXY)")
+        lines.append(f"- Wert: {dxy['value']}")
+        lines.append(f"- 1-Monats-Veränderung: {dxy['change_1m_pct']:+.2f}%")
+        lines.append(f"- Richtung: {dxy['direction']}")
+
     # Credit Spread
     cs = market.get("credit_spread")
     if cs:
@@ -381,15 +408,20 @@ def build_user_prompt(market, mech_signals, mech_score, history, theses, researc
         lines.append("Folgende tagesaktuelle News-Analysen liegen vor:")
         for nr in news_results:
             trend = nr.get("trend", "stable")
-            summary = nr.get("summary", "Keine Zusammenfassung")
             topic_title = nr.get("title") or nr.get("topic", "?")
-            lines.append(f"- **{topic_title}** ({trend}): {summary}")
+            lines.append(f"\n### {topic_title} — Trend: {trend}")
+            if nr.get("development"):
+                lines.append(f"Neue Entwicklung: {nr['development']}")
+            if nr.get("recurring"):
+                lines.append(f"Bestätigt sich: {nr['recurring']}")
+            if nr.get("summary"):
+                lines.append(f"Einordnung: {nr['summary']}")
             triggers = nr.get("triggers_detected", [])
             if triggers:
-                lines.append(f"  Trigger: {', '.join(triggers)}")
+                lines.append(f"Trigger: {', '.join(triggers)}")
             relevance = nr.get("ampel_relevance", "")
             if relevance:
-                lines.append(f"  Ampel-Relevanz: {relevance}")
+                lines.append(f"Ampel-Relevanz: {relevance}")
 
     return "\n".join(lines)
 

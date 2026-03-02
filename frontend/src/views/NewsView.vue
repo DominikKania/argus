@@ -164,6 +164,18 @@
               {{ latestResult.summary }}
             </div>
 
+            <!-- Development: Was ist neu? -->
+            <div v-if="latestResult.development" class="development-box">
+              <label class="section-label">Neue Entwicklung</label>
+              <p>{{ latestResult.development }}</p>
+            </div>
+
+            <!-- Recurring: Was bestätigt sich? -->
+            <div v-if="latestResult.recurring" class="recurring-box">
+              <label class="section-label">Bestätigt sich</label>
+              <p>{{ latestResult.recurring }}</p>
+            </div>
+
             <!-- Relevant Headlines -->
             <div v-if="latestResult.relevant_headlines?.length" class="headlines-section">
               <label class="section-label">Relevante Headlines</label>
@@ -204,6 +216,7 @@
               </button>
               <div v-if="deepResearchOpen" class="deep-research-content" v-html="renderMarkdown(latestResult.deep_research)" />
             </div>
+
           </div>
 
           <!-- Results History -->
@@ -827,6 +840,40 @@ onMounted(() => {
   border-radius: 8px;
   background: var(--p-surface-ground);
   margin-bottom: 1rem;
+}
+
+// Development & Recurring
+.development-box, .recurring-box {
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+
+  .section-label { margin-bottom: 0.25rem; }
+  p { margin: 0; color: var(--p-text-color); }
+}
+
+.development-box {
+  background: rgba(245, 158, 11, 0.06);
+  border-left: 3px solid #f59e0b;
+
+  :root.dark & {
+    background: rgba(245, 158, 11, 0.08);
+  }
+
+  .section-label { color: #d97706; :root.dark & { color: #fbbf24; } }
+}
+
+.recurring-box {
+  background: rgba(59, 130, 246, 0.06);
+  border-left: 3px solid #93c5fd;
+
+  :root.dark & {
+    background: rgba(59, 130, 246, 0.08);
+  }
+
+  .section-label { color: #3b82f6; :root.dark & { color: #93c5fd; } }
 }
 
 // Headlines

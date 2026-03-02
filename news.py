@@ -132,9 +132,9 @@ Du erhältst:
 Deine Aufgabe:
 - Filtere die relevanten Headlines für dieses Thema
 - Bewerte FAKTENBASIERT: Zähle positive vs. negative Headlines. Bewerte NUR was in den Headlines steht, nicht was du vermutest.
-- Beziehe dich auf den bisherigen Verlauf: Bestätigt sich ein Trend? Gibt es eine Trendwende?
+- Trenne klar: Was ist NEU (development) vs. was bestätigt sich (recurring)?
 - Identifiziere konkrete Trigger-Events (nur wenn explizit in Headlines erwähnt)
-- Gib eine kurze Zusammenfassung (3-5 Sätze) die auf den bisherigen Analysen aufbaut
+- Gib eine kurze Einordnung (summary: 2-3 Sätze), die Details stecken in development/recurring
 
 ## TREND-BESTIMMUNG (strenge Regeln)
 Zähle die relevanten Headlines nach Sentiment:
@@ -147,7 +147,9 @@ Wenn bisherige Analysen vorliegen: Ein Trendwechsel (z.B. von deteriorating zu i
 
 Antworte AUSSCHLIESSLICH mit einem JSON-Objekt:
 {
-  "summary": "3-5 Sätze Zusammenfassung der aktuellen Lage zu diesem Thema, aufbauend auf bisherigem Verlauf",
+  "summary": "2-3 Sätze Einordnung: Wo steht das Thema heute? Keine Wiederholung der Gesamtlage — die steckt in development/recurring.",
+  "development": "Was ist NEU seit der letzten Analyse? Nur Fakten die vorher NICHT bekannt waren: neue Ereignisse, Eskalationen, Wendepunkte, neue Akteure. Wenn erste Analyse (keine bisherigen): Ausgangslage beschreiben.",
+  "recurring": "Was bestätigt sich weiterhin? Welche Themen, Risiken oder Trends tauchen wiederholt auf? Wenn erste Analyse (keine bisherigen): leerer String.",
   "relevant_headlines": [
     {"title": "Deutsche Übersetzung der Headline", "source": "Quellenname", "link": "https://...", "relevance": "high|medium|low", "sentiment": "positive|negative|neutral"}
   ],
@@ -160,13 +162,15 @@ Antworte AUSSCHLIESSLICH mit einem JSON-Objekt:
 
 REGELN:
 - Alle Texte auf Deutsch
+- development: STRIKT nur neue Informationen. Vergleiche mit den bisherigen Analysen — was dort schon stand, gehört NICHT in development sondern in recurring. Bei erster Analyse: beschreibe die Ausgangslage.
+- recurring: Nur befüllen wenn bisherige Analysen vorliegen. Fasse zusammen was sich über mehrere Tage bestätigt (z.B. "Ölpreise bleiben erhöht", "Handelsrouten weiter gestört").
+- summary: Kurze Einordnung (2-3 Sätze). KEINE Wiederholung von development/recurring. Fokus auf: Was bedeutet das insgesamt?
 - relevant_headlines: title IMMER auf Deutsch übersetzen (auch wenn Original englisch ist). source und link aus den Input-Headlines übernehmen.
 - relevant_headlines: nur Headlines die wirklich zum Thema passen (max 5)
 - sentiment_count: Zählung MUSS mit den sentiment-Werten in relevant_headlines übereinstimmen
 - trend MUSS mit sentiment_count konsistent sein (nicht mehr negative als positive und trotzdem "improving")
 - triggers_detected: leere Liste wenn keine Trigger erkannt. NUR Trigger die EXPLIZIT in Headlines stehen.
 - Wenn keine relevanten Headlines gefunden: summary = "Keine relevanten Nachrichten heute", trend = "stable"
-- Wenn bisherige Analysen vorliegen: Beziehe dich explizit auf Veränderungen ("Gestern noch deteriorating, heute Anzeichen für Stabilisierung" etc.)
 """
 
 
@@ -376,10 +380,16 @@ def analyze_news_topic(topic_doc, headlines, market_context=None, previous_resul
         parts.extend(["", f"## BISHERIGE ANALYSEN (letzte {len(previous_results)} Tage)"])
         for prev in previous_results:
             triggers = ", ".join(prev.get("triggers_detected", [])) or "keine"
-            parts.append(
-                f"- {prev['date']}: {prev.get('trend', '?')} — {prev.get('summary', '')}\n"
-                f"  Trigger: {triggers} | Ampel: {prev.get('ampel_relevance', '-')}"
+            entry = (
+                f"### {prev['date']} — Trend: {prev.get('trend', '?')}\n"
+                f"Zusammenfassung: {prev.get('summary', '')}\n"
+                f"Trigger: {triggers}"
             )
+            if prev.get("development"):
+                entry += f"\nNeue Entwicklung: {prev['development']}"
+            if prev.get("recurring"):
+                entry += f"\nBestätigt sich: {prev['recurring']}"
+            parts.append(entry)
 
     if market_context:
         parts.extend(["", "## MARKTKONTEXT", market_context])
@@ -461,6 +471,8 @@ def run_news_topic(db, topic_slug, headlines=None):
         "relevant_headlines": result.get("relevant_headlines", []),
         "sentiment_count": result.get("sentiment_count", {}),
         "summary": result.get("summary", ""),
+        "development": result.get("development", ""),
+        "recurring": result.get("recurring", ""),
         "trend": result.get("trend", "stable"),
         "trend_reasoning": result.get("trend_reasoning", ""),
         "triggers_detected": result.get("triggers_detected", []),

@@ -6,10 +6,12 @@ export const API_ENDPOINTS = {
     THESES: '/ampel/theses',
     UPDATE_THESIS: (id: string) => `/ampel/theses/${id}`,
     REFINE_THESIS: '/ampel/theses/refine',
+    PROMPTS: '/ampel/prompts',
   },
   PRICES: {
     WATCHLIST: '/prices/watchlist',
     TICKER: (ticker: string, days = 30) => `/prices/${ticker}?days=${days}`,
+    SYNC: '/prices/sync',
   },
   CHAT: '/chat/',
   CHAT_STREAM: '/chat/stream',

@@ -9,6 +9,7 @@ export const usePricesStore = defineStore('prices', () => {
   const prices = ref<PriceEntry[]>([])
   const selectedTicker = ref<string>('IWDA.AS')
   const loading = ref(false)
+  const syncing = ref(false)
   const error = ref<string | null>(null)
 
   async function fetchWatchlist() {
@@ -48,14 +49,36 @@ export const usePricesStore = defineStore('prices', () => {
     }
   }
 
+  async function syncPrices() {
+    syncing.value = true
+    error.value = null
+    try {
+      const result = await ApiService.post<{ total_new_records: number; results: any[] }>(
+        API_ENDPOINTS.PRICES.SYNC,
+        {},
+      )
+      // Reload current view after sync
+      await fetchPrices(selectedTicker.value, 60)
+      return result
+    } catch (err) {
+      error.value = 'Fehler beim Synchronisieren der Kursdaten'
+      console.error(err)
+      throw err
+    } finally {
+      syncing.value = false
+    }
+  }
+
   return {
     watchlist,
     prices,
     selectedTicker,
     loading,
+    syncing,
     error,
     fetchWatchlist,
     fetchPrices,
     fetchAll,
+    syncPrices,
   }
 })

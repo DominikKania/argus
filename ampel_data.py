@@ -39,6 +39,11 @@ EURUSD_TICKER = "EURUSD=X"
 HYG_TICKER = "HYG"   # iShares iBoxx High Yield Corporate Bond ETF
 LQD_TICKER = "LQD"   # iShares iBoxx Investment Grade Corporate Bond ETF
 
+# Commodities & Safe Havens
+OIL_TICKER = "BZ=F"   # Brent Crude Oil Futures
+GOLD_TICKER = "GC=F"  # Gold Futures
+DXY_TICKER = "DX-Y.NYB"  # US Dollar Index
+
 
 # ── Daten holen ──────────────────────────────────────────────────────────
 
@@ -470,6 +475,96 @@ def fetch_credit_spread():
         return None
 
 
+def fetch_oil():
+    """Holt Brent-Ölpreis, 1-Monats-Veränderung und Richtung.
+
+    Returns:
+        dict mit price, change_1m_pct, direction — oder None bei Fehler.
+    """
+    try:
+        t = yf.Ticker(OIL_TICKER)
+        hist = t.history(period="1mo")
+        if hist.empty or len(hist) < 2:
+            log.warning("Öl: keine Daten")
+            return None
+
+        close = hist["Close"]
+        price = round(float(close.iloc[-1]), 2)
+        price_1m = round(float(close.iloc[0]), 2)
+        change = round(((price - price_1m) / price_1m) * 100, 2)
+        direction = "rising" if change > 2 else ("falling" if change < -2 else "flat")
+
+        log.info("Öl (Brent): $%.2f (1M: %+.2f%%, %s)", price, change, direction)
+        return {
+            "price": price,
+            "change_1m_pct": change,
+            "direction": direction,
+        }
+    except Exception as e:
+        log.warning("Öl-Daten fehlgeschlagen: %s", e)
+        return None
+
+
+def fetch_gold():
+    """Holt Goldpreis, 1-Monats-Veränderung und Richtung.
+
+    Returns:
+        dict mit price, change_1m_pct, direction — oder None bei Fehler.
+    """
+    try:
+        t = yf.Ticker(GOLD_TICKER)
+        hist = t.history(period="1mo")
+        if hist.empty or len(hist) < 2:
+            log.warning("Gold: keine Daten")
+            return None
+
+        close = hist["Close"]
+        price = round(float(close.iloc[-1]), 2)
+        price_1m = round(float(close.iloc[0]), 2)
+        change = round(((price - price_1m) / price_1m) * 100, 2)
+        direction = "rising" if change > 1 else ("falling" if change < -1 else "flat")
+
+        log.info("Gold: $%.2f (1M: %+.2f%%, %s)", price, change, direction)
+        return {
+            "price": price,
+            "change_1m_pct": change,
+            "direction": direction,
+        }
+    except Exception as e:
+        log.warning("Gold-Daten fehlgeschlagen: %s", e)
+        return None
+
+
+def fetch_dxy():
+    """Holt US Dollar Index, 1-Monats-Veränderung und Richtung.
+
+    Returns:
+        dict mit value, change_1m_pct, direction — oder None bei Fehler.
+    """
+    try:
+        t = yf.Ticker(DXY_TICKER)
+        hist = t.history(period="1mo")
+        if hist.empty or len(hist) < 2:
+            log.warning("DXY: keine Daten")
+            return None
+
+        close = hist["Close"]
+        value = round(float(close.iloc[-1]), 2)
+        value_1m = round(float(close.iloc[0]), 2)
+        change = round(((value - value_1m) / value_1m) * 100, 2)
+        direction = "rising" if change > 0.5 else ("falling" if change < -0.5 else "flat")
+
+        log.info("DXY: %.2f (1M: %+.2f%%, %s)", value, change, direction)
+        return {
+            "value": value,
+            "change_1m_pct": change,
+            "direction": direction,
+        }
+    except Exception as e:
+        log.warning("DXY-Daten fehlgeschlagen: %s", e)
+        return None
+
+
 def fetch_all_market_data(db, cpi_override=None):
     """Holt alle Marktdaten und gibt das vollständige market-Dict zurück."""
     # Core-Daten (sequentiell — kritisch)
@@ -479,7 +574,7 @@ def fetch_all_market_data(db, cpi_override=None):
 
     # Erweiterte Daten (parallel — alle optional)
     extended = {}
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    with ThreadPoolExecutor(max_workers=9) as executor:
         futures = {
             executor.submit(fetch_sector_rotation): "sector_rotation",
             executor.submit(fetch_regional_comparison): "regional",
@@ -487,6 +582,9 @@ def fetch_all_market_data(db, cpi_override=None):
             executor.submit(fetch_put_call_ratio): "put_call",
             executor.submit(fetch_eurusd): "eurusd",
             executor.submit(fetch_credit_spread): "credit_spread",
+            executor.submit(fetch_oil): "oil",
+            executor.submit(fetch_gold): "gold",
+            executor.submit(fetch_dxy): "dxy",
         }
         for future in as_completed(futures):
             key = futures[future]

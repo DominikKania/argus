@@ -47,6 +47,10 @@ function askAboutItem(item: { label: string; text: string }) {
 }
 
 const NOTE_CONFIG: Record<string, { label: string; icon: string }> = {
+  iran_note: { label: 'Iran / Geopolitik', icon: 'pi pi-exclamation-triangle' },
+  tariff_note: { label: 'Zölle / Handel', icon: 'pi pi-box' },
+  macro_note: { label: 'Makro', icon: 'pi pi-chart-line' },
+  market_note: { label: 'Markt / Technik', icon: 'pi pi-chart-bar' },
   sector_rotation_note: { label: 'Sektor-Rotation', icon: 'pi pi-sync' },
   regional_note: { label: 'Regional (USA vs. Europa)', icon: 'pi pi-globe' },
   put_call_note: { label: 'Put/Call Ratio', icon: 'pi pi-chart-bar' },
@@ -56,13 +60,21 @@ const NOTE_CONFIG: Record<string, { label: string; icon: string }> = {
   credit_spread_note: { label: 'Credit Spread (HY)', icon: 'pi pi-chart-line' },
 }
 
+function keyToLabel(key: string): string {
+  return key.replace(/_note$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 const contextItems = computed(() => {
   const items: Array<{ key: string; label: string; icon: string; text: string }> = []
-  for (const [key, config] of Object.entries(NOTE_CONFIG)) {
-    const text = props.context[key as keyof MarketContext]
-    if (text) {
-      items.push({ key, ...config, text })
-    }
+  for (const [key, text] of Object.entries(props.context)) {
+    if (!text) continue
+    const config = NOTE_CONFIG[key]
+    items.push({
+      key,
+      label: config?.label || keyToLabel(key),
+      icon: config?.icon || 'pi pi-info-circle',
+      text,
+    })
   }
   return items
 })

@@ -57,6 +57,9 @@
         <ThesisCard v-if="analysis.thesis" :thesis="analysis.thesis" />
         <RecommendationCard :analysis="analysis" />
       </div>
+
+      <!-- Prompt Transparency -->
+      <PromptCard />
     </template>
   </div>
 </template>
@@ -73,6 +76,7 @@ import MarketContextCard from '@/components/features/ampel/MarketContextCard.vue
 import SentimentEvents from '@/components/features/ampel/SentimentEvents.vue'
 import ThesisCard from '@/components/features/ampel/ThesisCard.vue'
 import RecommendationCard from '@/components/features/ampel/RecommendationCard.vue'
+import PromptCard from '@/components/features/ampel/PromptCard.vue'
 
 const ampelStore = useAmpelStore()
 const analysis = computed(() => ampelStore.latestAnalysis)
@@ -177,5 +181,9 @@ onMounted(() => {
 .ampel-view > :deep(.market-context-card),
 .ampel-view > :deep(.sentiment-events) {
   margin-bottom: 1.5rem;
+}
+
+.ampel-view > :deep(.prompt-card) {
+  margin-top: 1.5rem;
 }
 </style>

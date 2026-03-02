@@ -9,8 +9,18 @@ from bson import ObjectId
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import sys
+from pathlib import Path
+
+# Ensure project root is in path for ampel_data import
+_project_root = str(Path(__file__).resolve().parent.parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 from ..db import get_db
 from ..llm import call_llm
+from ampel_data import fetch_all_market_data, calculate_mechanical_signals
+from ampel_auto import SYSTEM_PROMPT, build_user_prompt
 
 log = logging.getLogger("argus")
 
@@ -83,6 +93,52 @@ def _serialize_doc(doc):
     return doc
 
 
+@router.get("/market-data")
+def get_market_data():
+    """Fetch fresh market data from yfinance."""
+    try:
+        db = get_db()
+        market = fetch_all_market_data(db)
+        signals, score = calculate_mechanical_signals(market)
+        return {
+            "market": market,
+            "mechanical_signals": signals,
+            "mechanical_score": score,
+        }
+    except Exception as e:
+        log.error("Marktdaten-Abruf fehlgeschlagen: %s", e)
+        raise HTTPException(status_code=500, detail=f"Marktdaten-Abruf fehlgeschlagen: {e}")
+
+
+@router.get("/prompts")
+def get_prompts():
+    """Baut den Analyse-Prompt live aus der aktuellen Analyse zusammen."""
+    db = get_db()
+    analysis = db.analyses.find_one(sort=[("date", -1)])
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Keine Analyse vorhanden")
+
+    market = analysis.get("market", {})
+    signals, score = calculate_mechanical_signals(market)
+
+    history = list(db.analyses.find({}, {"_id": 0}).sort("date", -1).limit(6))[1:]
+    theses = list(db.theses.find({"status": "open"}, {"_id": 0}))
+    news_results = list(
+        db.news_results.find(
+            {"date": analysis["date"]}, {"raw_headlines": 0, "_id": 0}
+        )
+    )
+
+    user_prompt = build_user_prompt(
+        market, signals, score, history, theses, news_results=news_results
+    )
+
+    return {
+        "system": SYSTEM_PROMPT,
+        "user": user_prompt,
+    }
+
+
 @router.get("/latest")
 def get_latest():
     db = get_db()
@@ -150,11 +206,13 @@ def _build_news_context(db) -> str:
             continue
         seen_topics.add(topic)
 
-        parts.append(f"\n### {topic} ({r.get('date', '?')})")
+        parts.append(f"\n### {topic} ({r.get('date', '?')}) — Trend: {r.get('trend', '?')}")
+        if r.get("development"):
+            parts.append(f"Neue Entwicklung: {r['development']}")
+        if r.get("recurring"):
+            parts.append(f"Bestätigt sich: {r['recurring']}")
         if r.get("summary"):
-            parts.append(f"Zusammenfassung: {r['summary']}")
-        if r.get("trend"):
-            parts.append(f"Trend: {r['trend']}")
+            parts.append(f"Einordnung: {r['summary']}")
         if r.get("triggers_detected"):
             parts.append(f"Trigger: {', '.join(r['triggers_detected'])}")
         if r.get("ampel_relevance"):

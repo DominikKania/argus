@@ -36,26 +36,29 @@ def slugify(title: str) -> str:
 
 
 def _extract_relevance_summary(markdown: str) -> Optional[str]:
-    """Extract the relevance summary line from research markdown output."""
-    # Try: **Relevanz-Zusammenfassung:** ...
+    """Extract the relevance summary from research markdown output.
+
+    Captures all text after the label until the next heading or end of document.
+    """
+    # Try: **Relevanz-Zusammenfassung:** ... (capture until next heading or EOF)
     match = re.search(
-        r"\*\*Relevanz[- ]?Zusammenfassung[:\s]*\*\*[:\s]*(.+?)(?:\n|$)",
+        r"\*\*Relevanz[- ]?Zusammenfassung[:\s]*\*\*[:\s]*([\s\S]+?)(?=\n#{1,4}\s|\Z)",
         markdown,
         re.IGNORECASE,
     )
     if match:
         return match.group(1).strip()
-    # Try: Relevanz-Zusammenfassung: ...
+    # Try: Relevanz-Zusammenfassung: ... (without bold)
     match = re.search(
-        r"(?:Relevanz|RELEVANZ)[- ]?(?:Zusammenfassung|ZUSAMMENFASSUNG)[:\s]*(.+?)(?:\n|$)",
+        r"(?:Relevanz|RELEVANZ)[- ]?(?:Zusammenfassung|ZUSAMMENFASSUNG)[:\s]*([\s\S]+?)(?=\n#{1,4}\s|\Z)",
         markdown,
         re.IGNORECASE,
     )
     if match:
         return match.group(1).strip()
-    # Fallback: First sentence after "Executive Summary" or "Zusammenfassung" heading
+    # Fallback: First paragraph after "Executive Summary" or "Zusammenfassung" heading
     match = re.search(
-        r"(?:Executive Summary|Zusammenfassung)\s*\n+(.+?)(?:\n|$)",
+        r"(?:Executive Summary|Zusammenfassung)\s*\n+([\s\S]+?)(?=\n#{1,4}\s|\n\n|\Z)",
         markdown,
         re.IGNORECASE,
     )
@@ -63,8 +66,6 @@ def _extract_relevance_summary(markdown: str) -> Optional[str]:
         summary = match.group(1).strip()
         # Clean markdown formatting
         summary = re.sub(r"\*\*(.+?)\*\*", r"\1", summary)
-        if len(summary) > 200:
-            summary = summary[:197] + "..."
         return summary
     return None
 
@@ -340,9 +341,156 @@ def update_topic(id_or_slug: str, req: UpdateResearchRequest):
     return updated
 
 
+# ── Orchestrated Research ────────────────────────────────────────────────
+
+PLANNER_SYSTEM = """\
+Du bist ein Research-Planner. Deine Aufgabe: Zerlege den Research-Prompt in einzelne, \
+unabhängig analysierbare Sektionen.
+
+## REGELN
+- Antworte NUR mit einem JSON-Array von Objekten
+- Jedes Objekt hat: {"title": "Sektionsname", "instruction": "Was genau analysiert werden soll"}
+- Maximal 8 Sektionen, mindestens 2
+- Die letzte Sektion MUSS immer "Synthese & Fazit" sein
+- Kein Markdown, kein erklärenden Text — NUR das JSON-Array
+- Behalte alle spezifischen Details und Fragestellungen des Original-Prompts bei
+
+Beispiel:
+[
+  {"title": "Tech-Sektor Analyse", "instruction": "Analysiere die Auswirkungen auf..."},
+  {"title": "Synthese & Fazit", "instruction": "Fasse alle Erkenntnisse zusammen..."}
+]"""
+
+SECTION_SYSTEM = """\
+Du bist ein Deep-Research-Analyst im Argus Investment-System. Du analysierst EINEN \
+spezifischen Teilaspekt einer größeren Research.
+
+## PORTFOLIO-KONTEXT
+Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+
+## REGELN
+- Schreibe NUR über den zugewiesenen Teilaspekt
+- Alle Texte auf Deutsch
+- Faktenbasiert, konkret: Nenne Zahlen, Daten, Zeiträume
+- Beziehe den Portfolio-Kontext ein
+- Strukturiere mit Markdown (### für Unterabschnitte)
+- KEIN Fazit, KEINE Zusammenfassung — das kommt separat
+- HINWEIS: Du hast keinen Web-Zugang. Analysiere basierend auf deinem aktuellen Wissen."""
+
+SYNTHESIS_SYSTEM = """\
+Du bist ein Senior-Analyst im Argus Investment-System. Du erhältst die Ergebnisse \
+mehrerer Teilanalysen und erstellst daraus eine Gesamtsynthese.
+
+## PORTFOLIO-KONTEXT
+Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+
+## AUSGABE-FORMAT
+Erstelle die finale Synthese im Markdown-Format:
+
+### Gesamtbewertung
+Übergreifende Einschätzung (3-5 Sätze)
+
+### Portfolio-Auswirkungen
+Konkrete Netto-Effekte auf den MSCI World ETF
+
+### Szenarien
+- **Positives Szenario:** ...
+- **Negatives Szenario:** ...
+- **Wahrscheinlichstes Szenario:** ...
+
+### Beobachtungspunkte
+Top 5-7 Indikatoren die der Anleger beobachten sollte
+
+### Fazit
+Handlungsempfehlung
+
+**Relevanz-Zusammenfassung:** Ein einzelner Satz der die Kernaussage für die Ampel-Analyse zusammenfasst.
+
+## REGELN
+- Alle Texte auf Deutsch
+- Vermeide Wiederholungen aus den Teilanalysen
+- Fokus auf Querverbindungen und Netto-Effekte
+- Sei konkret mit Zahlen und Zeiträumen"""
+
+
+def _parse_sections(raw: str) -> list[dict]:
+    """Parse the planner output into a list of section dicts."""
+    # Strip markdown code fences if present
+    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        sections = json.loads(cleaned)
+        if isinstance(sections, list) and all(
+            isinstance(s, dict) and "title" in s and "instruction" in s
+            for s in sections
+        ):
+            return sections
+    except json.JSONDecodeError:
+        pass
+    # Fallback: could not parse, return empty to trigger single-call mode
+    return []
+
+
+def _run_orchestrated(prompt: str, market_context: str) -> str:
+    """Run research by splitting into sections, analyzing each, then synthesizing."""
+    # Step 1: Plan sections
+    log.info("Orchestrated Research: Starte Planung...")
+    plan_raw = call_llm(
+        PLANNER_SYSTEM,
+        [{"role": "user", "content": prompt}],
+        max_tokens=2048,
+    )
+    sections = _parse_sections(plan_raw)
+
+    if len(sections) < 2:
+        # Fallback: single call if planner failed
+        log.warning("Planner konnte Prompt nicht zerlegen — Fallback auf Single-Call.")
+        return call_llm(
+            RESEARCH_SYSTEM_PROMPT,
+            [{"role": "user", "content": prompt + market_context}],
+            max_tokens=16384,
+        )
+
+    log.info("Orchestrated Research: %d Sektionen geplant.", len(sections))
+
+    # Step 2: Analyze each section (except last = synthesis)
+    analysis_sections = sections[:-1]
+    section_results = []
+
+    for i, section in enumerate(analysis_sections, 1):
+        log.info("Orchestrated Research: Sektion %d/%d — %s", i, len(analysis_sections), section["title"])
+        user_msg = (
+            f"## Gesamtthema\n{prompt}\n\n"
+            f"## Deine Aufgabe: {section['title']}\n{section['instruction']}"
+            f"{market_context}"
+        )
+        result = call_llm(
+            SECTION_SYSTEM,
+            [{"role": "user", "content": user_msg}],
+            max_tokens=8192,
+        )
+        section_results.append(f"## {section['title']}\n\n{result}")
+
+    # Step 3: Synthesize
+    log.info("Orchestrated Research: Starte Synthese...")
+    combined = "\n\n---\n\n".join(section_results)
+    synthesis = call_llm(
+        SYNTHESIS_SYSTEM,
+        [{"role": "user", "content": f"## Teilanalysen\n\n{combined}\n\n{market_context}"}],
+        max_tokens=4096,
+    )
+
+    # Combine all into final document
+    final = f"# {sections[0].get('title', 'Research')}\n\n"
+    final += combined
+    final += f"\n\n---\n\n## Synthese & Fazit\n\n{synthesis}"
+
+    return final
+
+
 @router.post("/{id_or_slug}/run")
 def run_research(id_or_slug: str):
-    """Execute research for a topic."""
+    """Execute research for a topic using orchestrated multi-step analysis."""
     db = get_db()
     doc = _resolve_topic(db, id_or_slug)
     if not doc:
@@ -369,12 +517,7 @@ def run_research(id_or_slug: str):
                 + json.dumps(analysis, ensure_ascii=False, indent=2, default=str)
             )
 
-        user_content = doc["prompt"] + market_context
-
-        results = call_llm(
-            RESEARCH_SYSTEM_PROMPT,
-            [{"role": "user", "content": user_content}],
-        )
+        results = _run_orchestrated(doc["prompt"], market_context)
 
         relevance = _extract_relevance_summary(results)
         now = datetime.now().strftime("%Y-%m-%d")

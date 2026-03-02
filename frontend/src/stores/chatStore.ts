@@ -7,6 +7,74 @@ export interface ChatMessage {
   content: string
 }
 
+/**
+ * Typewriter that drips queued text word-by-word into a target ref.
+ * Creates a smooth "someone is typing" feel regardless of network chunking.
+ */
+/**
+ * RAF-based smooth streamer. Buffers all incoming text and reveals it
+ * character-by-character at a constant rate synced to the display refresh.
+ * This is the same technique used by ChatGPT / Vercel AI SDK.
+ */
+function createSmoothStream(
+  messages: { value: ChatMessage[] },
+  getIdx: () => number,
+  charsPerSecond = 200,
+) {
+  let fullText = ''
+  let charIndex = 0
+  let lastTime = 0
+  let frameId: number | null = null
+  const msPerChar = 1000 / charsPerSecond
+
+  function animate(time: number) {
+    const elapsed = time - lastTime
+    if (elapsed >= msPerChar) {
+      // Advance by however many chars are due (catch up if behind)
+      const charsToAdvance = Math.max(1, Math.floor(elapsed / msPerChar))
+      charIndex = Math.min(charIndex + charsToAdvance, fullText.length)
+
+      const idx = getIdx()
+      messages.value[idx] = {
+        ...messages.value[idx],
+        content: fullText.slice(0, charIndex),
+      }
+      lastTime = time
+    }
+
+    if (charIndex < fullText.length) {
+      frameId = requestAnimationFrame(animate)
+    } else {
+      frameId = null
+    }
+  }
+
+  return {
+    push(text: string) {
+      fullText += text
+      if (!frameId) {
+        lastTime = performance.now()
+        frameId = requestAnimationFrame(animate)
+      }
+    },
+    finish() {
+      if (frameId) {
+        cancelAnimationFrame(frameId)
+        frameId = null
+      }
+      const idx = getIdx()
+      messages.value[idx] = {
+        ...messages.value[idx],
+        content: fullText,
+      }
+      charIndex = fullText.length
+    },
+    get pending() {
+      return charIndex < fullText.length
+    },
+  }
+}
+
 export interface PromptReviewContext {
   topicId: string
   topicTitle: string
@@ -88,6 +156,8 @@ export const useChatStore = defineStore('chat', () => {
     messages.value.push({ role: 'assistant', content: '' })
     const assistantIdx = messages.value.length - 1
 
+    const typewriter = createSmoothStream(messages, () => assistantIdx)
+
     try {
       const history = messages.value.slice(0, -2) // exclude current user + empty assistant
 
@@ -139,10 +209,7 @@ export const useChatStore = defineStore('chat', () => {
           try {
             const parsed = JSON.parse(data)
             if (typeof parsed === 'string') {
-              messages.value[assistantIdx] = {
-                ...messages.value[assistantIdx],
-                content: messages.value[assistantIdx].content + parsed,
-              }
+              typewriter.push(parsed)
             } else if (parsed.error) {
               throw new Error(parsed.error)
             }
@@ -152,12 +219,16 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
 
+      // Drain any remaining queued text
+      typewriter.finish()
+
       // Remove empty assistant message if nothing was received
       if (!messages.value[assistantIdx].content) {
         messages.value.splice(assistantIdx, 1)
         error.value = 'Keine Antwort erhalten'
       }
     } catch (err) {
+      typewriter.finish()
       error.value = 'Fehler beim Senden der Nachricht'
       console.error(err)
       // Remove empty assistant message and user message on error

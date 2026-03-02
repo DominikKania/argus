@@ -14,6 +14,8 @@ export interface NewsResult {
   relevant_headlines: NewsHeadline[]
   sentiment_count?: { positive: number; negative: number; neutral: number }
   summary: string
+  development?: string
+  recurring?: string
   trend: 'improving' | 'stable' | 'deteriorating'
   trend_reasoning?: string
   triggers_detected: string[]
