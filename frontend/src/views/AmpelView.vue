@@ -58,6 +58,9 @@
         <RecommendationCard :analysis="analysis" />
       </div>
 
+      <!-- Research Context -->
+      <ResearchContextCard />
+
       <!-- Prompt Transparency -->
       <PromptCard />
     </template>
@@ -76,6 +79,7 @@ import MarketContextCard from '@/components/features/ampel/MarketContextCard.vue
 import SentimentEvents from '@/components/features/ampel/SentimentEvents.vue'
 import ThesisCard from '@/components/features/ampel/ThesisCard.vue'
 import RecommendationCard from '@/components/features/ampel/RecommendationCard.vue'
+import ResearchContextCard from '@/components/features/ampel/ResearchContextCard.vue'
 import PromptCard from '@/components/features/ampel/PromptCard.vue'
 
 const ampelStore = useAmpelStore()
@@ -181,6 +185,10 @@ onMounted(() => {
 .ampel-view > :deep(.market-context-card),
 .ampel-view > :deep(.sentiment-events) {
   margin-bottom: 1.5rem;
+}
+
+.ampel-view > :deep(.research-context-card) {
+  margin-top: 1.5rem;
 }
 
 .ampel-view > :deep(.prompt-card) {
