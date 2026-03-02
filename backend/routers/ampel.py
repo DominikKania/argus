@@ -20,7 +20,8 @@ if _project_root not in sys.path:
 from ..db import get_db
 from ..llm import call_llm
 from ampel_data import fetch_all_market_data, calculate_mechanical_signals
-from ampel_auto import SYSTEM_PROMPT, build_user_prompt
+from ampel_auto import SYSTEM_PROMPT
+from backend.prompt_builder import build_user_prompt, build_news_context
 
 log = logging.getLogger("argus")
 
@@ -198,53 +199,21 @@ def update_thesis(thesis_id: str, req: UpdateThesisRequest):
     return _serialize_doc(updated)
 
 
-def _build_news_context(db) -> str:
-    """Build news context from latest results for all active topics."""
-    results = list(
-        db.news_results.find(
-            {},
-            {"raw_headlines": 0, "_id": 0},
-        ).sort("date", -1).limit(10)
-    )
+def _build_news_context_for_thesis(db) -> str:
+    """Build news context string for thesis refinement."""
+    results = []
+    seen_topics = set()
+    for nr in db.news_results.find(
+        {}, {"raw_headlines": 0, "_id": 0}
+    ).sort("date", -1):
+        topic = nr.get("topic", "")
+        if topic not in seen_topics:
+            seen_topics.add(topic)
+            results.append(nr)
     if not results:
         return ""
-
-    parts = ["\n## AKTUELLE NEWS-DATEN"]
-    seen_topics = set()
-    for r in results:
-        topic = r.get("topic", "")
-        if topic in seen_topics:
-            continue
-        seen_topics.add(topic)
-
-        parts.append(f"\n### {topic} ({r.get('date', '?')}) — Trend: {r.get('trend', '?')}")
-        if r.get("development"):
-            parts.append(f"Neue Entwicklung: {r['development']}")
-        if r.get("recurring"):
-            parts.append(f"Bestätigt sich: {r['recurring']}")
-        if r.get("summary"):
-            parts.append(f"Einordnung: {r['summary']}")
-        if r.get("triggers_detected"):
-            parts.append(f"Trigger: {', '.join(r['triggers_detected'])}")
-        if r.get("ampel_relevance"):
-            parts.append(f"Ampel-Relevanz: {r['ampel_relevance']}")
-
-        headlines = r.get("relevant_headlines", [])
-        high = [h for h in headlines if h.get("relevance") == "high"]
-        if high:
-            parts.append("Wichtigste Schlagzeilen:")
-            for h in high[:5]:
-                sentiment = h.get("sentiment", "neutral")
-                parts.append(f"  - [{sentiment}] {h.get('title', '?')}")
-
-        if r.get("deep_research"):
-            # First 500 chars of deep research as context
-            preview = r["deep_research"][:500]
-            if len(r["deep_research"]) > 500:
-                preview += "..."
-            parts.append(f"Deep-Research-Auszug: {preview}")
-
-    return "\n".join(parts)
+    lines = build_news_context(results)
+    return "\n".join(lines)
 
 
 @router.post("/theses/refine")
@@ -267,7 +236,7 @@ def refine_thesis(req: RefineThesisRequest):
             parts.append(f"**Wenn negativ:** {req.thesis['expected_if_negative']}")
 
         # Add news context
-        news_ctx = _build_news_context(db)
+        news_ctx = _build_news_context_for_thesis(db)
         if news_ctx:
             parts.append(news_ctx)
 
