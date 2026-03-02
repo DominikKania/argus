@@ -123,6 +123,10 @@ def get_prompts():
 
     history = list(db.analyses.find({}, {"_id": 0}).sort("date", -1).limit(6))[1:]
     theses = list(db.theses.find({"status": "open"}, {"_id": 0}))
+    researches = list(db.researches.find(
+        {"status": "completed", "relevance_summary": {"$ne": None}},
+        {"results": 0, "_id": 0},
+    ))
     news_results = list(
         db.news_results.find(
             {"date": analysis["date"]}, {"raw_headlines": 0, "_id": 0}
@@ -130,7 +134,7 @@ def get_prompts():
     )
 
     user_prompt = build_user_prompt(
-        market, signals, score, history, theses, news_results=news_results
+        market, signals, score, history, theses, researches, news_results
     )
 
     return {
