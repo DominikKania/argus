@@ -78,6 +78,12 @@ createNavigation({
       to: '/news',
       active: route.path.startsWith('/news'),
     },
+    {
+      label: 'Prompt',
+      icon: 'pi pi-database',
+      to: '/prompt-kontext',
+      active: route.path.startsWith('/prompt-kontext'),
+    },
   ],
 })
 </script>

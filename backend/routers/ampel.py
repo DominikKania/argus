@@ -1,4 +1,4 @@
-"""Ampel API routes."""
+"""Ampel API routes — Multi-Stage Pipeline."""
 
 import json
 import logging
@@ -7,6 +7,7 @@ from typing import Optional
 
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 import sys
@@ -18,10 +19,26 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from ..db import get_db
-from ..llm import call_llm
+from ..llm import call_llm, stream_llm
 from ampel_data import fetch_all_market_data, calculate_mechanical_signals
-from ampel_auto import SYSTEM_PROMPT
-from backend.prompt_builder import build_user_prompt, build_news_context
+from ampel_auto import (
+    TREND_ANALYST_PROMPT,
+    VOLATILITY_ANALYST_PROMPT,
+    MACRO_ANALYST_PROMPT,
+    SENTIMENT_ANALYST_PROMPT,
+    SYNTHESIS_PROMPT,
+    extract_json,
+    merge_multistage_analysis,
+    run_stage1,
+)
+from backend.prompt_builder import (
+    build_news_context,
+    build_trend_analyst_prompt,
+    build_volatility_analyst_prompt,
+    build_macro_analyst_prompt,
+    build_sentiment_analyst_prompt,
+    build_synthesis_prompt,
+)
 
 log = logging.getLogger("argus")
 
@@ -54,44 +71,56 @@ die These optimieren.
 {today}
 
 ## PORTFOLIO-KONTEXT
-Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700\u20ac, 100%
 
 ## DEINE AUFGABE
-- Lies die Original-These und den Gesprächsverlauf
-- Integriere alle Verbesserungsvorschläge, Wünsche und Feedback des Benutzers
+- Lies die Original-These und den Gespr\u00e4chsverlauf
+- Integriere alle Verbesserungsvorschl\u00e4ge, W\u00fcnsche und Feedback des Benutzers
 - Erstelle eine verbesserte Version der These
 - Behalte gute Aspekte des Originals bei, verbessere schwache Stellen
-- Stelle sicher, dass die These spezifisch, testbar und relevant für das Portfolio ist
+- Stelle sicher, dass die These spezifisch, testbar und relevant f\u00fcr das Portfolio ist
 
-## SPRACHE & VERSTÄNDLICHKEIT
-- Schreibe ALLE Texte in klarem, einfachem Deutsch — wie für einen interessierten Laien
-- KEINE Fachkürzel, Paragraphen-Nummern oder Gesetzesbezeichnungen (NICHT "Section 122", "IEEPA", "Art. 122 AEUV" etc.)
-- Stattdessen das Konzept in einfachen Worten erklären (z.B. "US-Notfallzölle" statt "Section-122-Zölle")
-- Kurze, klare Sätze. Jeder Satz muss ohne Vorwissen verständlich sein
+## SPRACHE & VERST\u00c4NDLICHKEIT
+- Schreibe ALLE Texte in klarem, einfachem Deutsch
+- KEINE Fachk\u00fcrzel, Paragraphen-Nummern oder Gesetzesbezeichnungen
+- Stattdessen das Konzept in einfachen Worten erkl\u00e4ren
+- Kurze, klare S\u00e4tze. Jeder Satz muss ohne Vorwissen verst\u00e4ndlich sein
 - Konkrete Auswirkungen beschreiben, nicht abstrakte Mechanismen
 
 ## REGELN
 - Antworte NUR mit einem JSON-Objekt (kein Markdown, kein Text drumherum)
 - Das JSON hat exakt diese Felder:
-  - "statement": Die Kernaussage der These — ein klarer, verständlicher Satz
-  - "catalyst": Was genau muss passieren? In einfachen Worten
+  - "statement": Die Kernaussage der These
+  - "catalyst": Was genau muss passieren?
   - "catalyst_date": Datum im Format YYYY-MM-DD — max. 4-6 Wochen in der Zukunft!
-  - "expected_if_positive": Was passiert für mein Portfolio wenn die These eintritt?
-  - "expected_if_negative": Was passiert für mein Portfolio wenn die These nicht eintritt?
-- Die These muss testbar und zeitlich eingrenzbar sein
-- WICHTIG: Zeithorizont max. 4-6 Wochen! Lieber einen konkreten nächsten Schritt \
-testen als ein vages Langfrist-Szenario. Keine Thesen über Monate hinweg.
-- Alle Daten müssen im aktuellen Jahr ({year}) oder später liegen!"""
+  - "expected_if_positive": Was passiert f\u00fcr mein Portfolio wenn die These eintritt?
+  - "expected_if_negative": Was passiert f\u00fcr mein Portfolio wenn die These nicht eintritt?
+- WICHTIG: Zeithorizont max. 4-6 Wochen!
+- Alle Daten m\u00fcssen im aktuellen Jahr ({year}) oder sp\u00e4ter liegen!"""
+
+
+def _sanitize_floats(obj):
+    """Replace NaN/Infinity with None for JSON compatibility."""
+    import math
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_floats(v) for v in obj]
+    return obj
 
 
 def _serialize_doc(doc):
-    """Convert MongoDB ObjectId fields to strings for JSON serialization."""
+    """Convert MongoDB ObjectId fields to strings and sanitize floats for JSON."""
     if doc is None:
         return None
     doc["_id"] = str(doc["_id"])
     if "analysis_id" in doc:
         doc["analysis_id"] = str(doc["analysis_id"])
-    return doc
+    return _sanitize_floats(doc)
 
 
 @router.get("/market-data")
@@ -113,13 +142,11 @@ def get_market_data():
 
 @router.get("/prompts")
 def get_prompts():
-    """Baut den Analyse-Prompt live aus der aktuellen Analyse zusammen."""
+    """Shows the multi-stage prompt structure for the current analysis."""
     db = get_db()
     analysis = db.analyses.find_one(sort=[("date", -1)])
     if not analysis:
         raise HTTPException(status_code=404, detail="Keine Analyse vorhanden")
-
-    today = datetime.now().strftime("%Y-%m-%d")
 
     market = analysis.get("market", {})
     signals, score = calculate_mechanical_signals(market)
@@ -130,7 +157,6 @@ def get_prompts():
         {"status": "completed", "relevance_summary": {"$ne": None}},
         {"_id": 0},
     ))
-    # Neueste News pro Topic (nicht nur Analyse-Datum)
     news_results = []
     seen_topics = set()
     for nr in db.news_results.find(
@@ -141,28 +167,204 @@ def get_prompts():
             seen_topics.add(topic)
             news_results.append(nr)
 
-    user_prompt = build_user_prompt(
-        market, signals, score, history, theses, researches, news_results
-    )
-
     return {
-        "system": SYSTEM_PROMPT,
-        "user": user_prompt,
+        "stages": {
+            "trend": {
+                "system": TREND_ANALYST_PROMPT,
+                "user": build_trend_analyst_prompt(market, signals, researches),
+            },
+            "volatility": {
+                "system": VOLATILITY_ANALYST_PROMPT,
+                "user": build_volatility_analyst_prompt(market, signals, researches),
+            },
+            "macro": {
+                "system": MACRO_ANALYST_PROMPT,
+                "user": build_macro_analyst_prompt(market, signals, researches),
+            },
+            "sentiment": {
+                "system": SENTIMENT_ANALYST_PROMPT,
+                "user": build_sentiment_analyst_prompt(market, signals, news_results, researches),
+            },
+            "synthesis": {
+                "system": SYNTHESIS_PROMPT,
+                "user": "(Ben\u00f6tigt Stage 1 Ergebnisse \u2014 nicht in Vorschau verf\u00fcgbar)",
+            },
+        },
     }
+
+
+def _sse_event(event_type: str, data) -> str:
+    """Format a Server-Sent Event."""
+    payload = json.dumps({"type": event_type, "data": data}, ensure_ascii=False, default=str)
+    return f"data: {payload}\n\n"
+
+
+@router.post("/run")
+def run_ampel_analysis():
+    """Run full multi-stage Ampel analysis with streaming output."""
+    def generate():
+        try:
+            db = get_db()
+            date_str = datetime.now().strftime("%Y-%m-%d")
+
+            # Delete existing analysis for today
+            existing = db.analyses.find_one({"date": date_str})
+            if existing:
+                db.analyses.delete_one({"date": date_str})
+                db.theses.delete_many({"analysis_id": existing["_id"]})
+                yield _sse_event("status", f"Bestehende Analyse f\u00fcr {date_str} gel\u00f6scht.")
+
+            # 1. Market data
+            yield _sse_event("status", "Hole Marktdaten...")
+            market = fetch_all_market_data(db)
+            mech_signals, mech_score = calculate_mechanical_signals(market)
+            yield _sse_event("status", f"Marktdaten geladen. Score: {mech_score}/4")
+
+            # 2. News
+            active_news = db.news_topics.count_documents({"active": True})
+            if active_news > 0:
+                yield _sse_event("status", f"Sammle News f\u00fcr {active_news} Topics...")
+                try:
+                    from news import run_all_news_topics
+                    news_count = run_all_news_topics(db)
+                    yield _sse_event("status", f"{news_count or 0} News-Topics aktualisiert.")
+                except Exception as e:
+                    yield _sse_event("status", f"News-Sammlung fehlgeschlagen: {e}")
+
+            # 3. Load context
+            yield _sse_event("status", "Lade Kontext (Historie, Thesen, Research, News)...")
+            history = list(db.analyses.find(sort=[("date", -1)]).limit(5))
+            theses = list(db.theses.find({"status": "open"}).sort("created_date", -1))
+            researches = list(db.researches.find(
+                {"status": "completed", "relevance_summary": {"$ne": None}},
+            ))
+            news_results = list(db.news_results.find(
+                {"date": date_str}, {"raw_headlines": 0},
+            ))
+
+            # 4. Stage 1: Signal-Analysten (4 parallel)
+            yield _sse_event("status", "Stage 1: Bewerte Signale (4 Analysten parallel)...")
+            stage1_results = run_stage1(market, mech_signals, news_results, researches)
+
+            # Emit signal results
+            for name in ["trend", "volatility", "macro", "sentiment"]:
+                r = stage1_results.get(name)
+                if r:
+                    yield _sse_event("signal", {
+                        "name": name,
+                        "context": r.get("context"),
+                        "note": r.get("note", ""),
+                    })
+                else:
+                    yield _sse_event("signal", {
+                        "name": name,
+                        "context": mech_signals[name],
+                        "note": "Fallback auf mechanisches Signal",
+                    })
+
+            # 5. Stage 2: Synthese (streamed)
+            yield _sse_event("status", "Stage 2: Synthese...")
+            synthesis_user = build_synthesis_prompt(
+                market, mech_signals, mech_score, stage1_results,
+                history, theses, researches, news_results,
+            )
+            yield _sse_event("prompt", {"system": SYNTHESIS_PROMPT, "user": synthesis_user})
+
+            llm_chunks = []
+            for chunk in stream_llm(
+                SYNTHESIS_PROMPT,
+                [{"role": "user", "content": synthesis_user}],
+                max_tokens=4096,
+            ):
+                llm_chunks.append(chunk)
+                yield _sse_event("chunk", chunk)
+
+            synthesis_text = "".join(llm_chunks)
+
+            # 6. Parse JSON
+            yield _sse_event("status", "Parse JSON...")
+            try:
+                stage2_result = extract_json(synthesis_text)
+            except (json.JSONDecodeError, ValueError) as e:
+                yield _sse_event("status", f"JSON-Parsing fehlgeschlagen: {e} \u2014 Retry...")
+                retry_prompt = (
+                    f"{synthesis_user}\n\n"
+                    f"WICHTIG: Dein vorheriger Versuch war kein g\u00fcltiges JSON. "
+                    f"Fehler: {e}\n"
+                    f"Antworte NUR mit dem JSON-Objekt."
+                )
+                retry_text = call_llm(
+                    SYNTHESIS_PROMPT,
+                    [{"role": "user", "content": retry_prompt}],
+                    max_tokens=4096,
+                )
+                stage2_result = extract_json(retry_text)
+                synthesis_text = retry_text
+
+            # 7. Merge & validate
+            analysis = merge_multistage_analysis(
+                date_str, market, mech_signals, mech_score, stage1_results, stage2_result,
+            )
+
+            from argus import validate_analysis
+            errors = validate_analysis(analysis)
+            if errors:
+                yield _sse_event("status", f"Validierungsfehler: {', '.join(errors)} \u2014 Retry...")
+                retry_prompt = (
+                    f"{synthesis_user}\n\n"
+                    f"WICHTIG: Validierungsfehler:\n"
+                    + "\n".join(f"- {e}" for e in errors)
+                    + "\nBitte korrigiere diese Fehler im JSON."
+                )
+                retry_text = call_llm(
+                    SYNTHESIS_PROMPT,
+                    [{"role": "user", "content": retry_prompt}],
+                    max_tokens=4096,
+                )
+                stage2_result = extract_json(retry_text)
+                analysis = merge_multistage_analysis(
+                    date_str, market, mech_signals, mech_score, stage1_results, stage2_result,
+                )
+                errors = validate_analysis(analysis)
+                if errors:
+                    yield _sse_event("error", f"Validierung nach Retry fehlgeschlagen: {', '.join(errors)}")
+                    return
+
+            # 8. Save
+            analysis["llm_output"] = synthesis_text
+            analysis["stage1_outputs"] = {
+                name: json.dumps(r, ensure_ascii=False) if r else None
+                for name, r in stage1_results.items()
+            }
+            yield _sse_event("status", "Speichere Analyse...")
+            from argus import save_analysis
+            save_analysis(db, analysis)
+
+            yield _sse_event("done", {
+                "rating": analysis["rating"]["overall"],
+                "score": analysis["rating"]["mechanical_score"],
+                "action": analysis["recommendation"]["action"],
+            })
+
+        except Exception as e:
+            log.error("Ampel-Run fehlgeschlagen: %s", e, exc_info=True)
+            yield _sse_event("error", str(e))
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @router.get("/latest")
 def get_latest():
     db = get_db()
     doc = db.analyses.find_one(sort=[("date", -1)])
-    return _serialize_doc(doc)
+    return JSONResponse(content=_serialize_doc(doc))
 
 
 @router.get("/history")
 def get_history(limit: int = 10):
     db = get_db()
     cursor = db.analyses.find(sort=[("date", -1)]).limit(limit)
-    return [_serialize_doc(doc) for doc in cursor]
+    return JSONResponse(content=[_serialize_doc(doc) for doc in cursor])
 
 
 @router.get("/theses")
@@ -179,7 +381,7 @@ def update_thesis(thesis_id: str, req: UpdateThesisRequest):
     try:
         oid = ObjectId(thesis_id)
     except Exception:
-        raise HTTPException(status_code=400, detail="Ungültige Thesis-ID.")
+        raise HTTPException(status_code=400, detail="Ung\u00fcltige Thesis-ID.")
 
     doc = db.theses.find_one({"_id": oid})
     if not doc:
@@ -192,7 +394,7 @@ def update_thesis(thesis_id: str, req: UpdateThesisRequest):
             update[field] = val
 
     if not update:
-        raise HTTPException(status_code=400, detail="Keine Änderungen angegeben.")
+        raise HTTPException(status_code=400, detail="Keine \u00c4nderungen angegeben.")
 
     db.theses.update_one({"_id": oid}, {"$set": update})
     updated = db.theses.find_one({"_id": oid})
@@ -240,7 +442,7 @@ def refine_thesis(req: RefineThesisRequest):
         if news_ctx:
             parts.append(news_ctx)
 
-        parts.append("\n## Gesprächsverlauf")
+        parts.append("\n## Gespr\u00e4chsverlauf")
         for msg in req.chat_history:
             role = "Benutzer" if msg.get("role") == "user" else "Tutor"
             parts.append(f"\n**{role}:** {msg.get('content', '')}")
@@ -253,7 +455,7 @@ def refine_thesis(req: RefineThesisRequest):
             [{"role": "user", "content": "\n".join(parts)}],
         )
 
-        # Parse JSON from response (strip markdown fences if present)
+        # Parse JSON from response
         cleaned = result.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]

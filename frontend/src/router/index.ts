@@ -42,6 +42,12 @@ const routes = [
         component: () => import('@/views/NewsView.vue'),
         meta: { title: 'News' },
       },
+      {
+        path: 'prompt-kontext',
+        name: 'prompt-kontext',
+        component: () => import('@/views/PromptKontextView.vue'),
+        meta: { title: 'Prompt-Kontext' },
+      },
     ],
   },
 ]

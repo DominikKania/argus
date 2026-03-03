@@ -188,6 +188,7 @@ class CreateResearchRequest(BaseModel):
 class UpdateResearchRequest(BaseModel):
     title: Optional[str] = None
     prompt: Optional[str] = None
+    ampel_targets: Optional[list[str]] = None
 
 
 class GeneratePromptRequest(BaseModel):
@@ -333,6 +334,9 @@ def update_topic(id_or_slug: str, req: UpdateResearchRequest):
         update["prompt"] = req.prompt
         if req.prompt.strip():
             update["status"] = "ready"
+    if req.ampel_targets is not None:
+        valid = {"trend", "volatility", "macro", "sentiment"}
+        update["ampel_targets"] = [t for t in req.ampel_targets if t in valid]
 
     db.researches.update_one({"_id": doc["_id"]}, {"$set": update})
 

@@ -202,6 +202,60 @@ def build_market_context(market: dict) -> list[str]:
     return lines
 
 
+def build_earnings_context(market: dict) -> list[str]:
+    """Build earnings season context from aggregated top-15 holdings data."""
+    earn = market.get("earnings")
+    if not earn:
+        return []
+
+    lines = [
+        "",
+        "## EARNINGS SEASON (Top-15 MSCI World Holdings, aggregiert)",
+        f"- Beat Rate: {earn['beat_rate']} ({earn['beat_rate_pct']:.0f}%)",
+        f"- Ø Earnings Surprise: {earn['avg_surprise_pct']:+.1f}%",
+    ]
+
+    if earn.get("fwd_eps_growth_0y") is not None:
+        lines.append(f"- Forward EPS Growth (lfd. Jahr): {earn['fwd_eps_growth_0y']*100:+.1f}%")
+
+    lines.extend([
+        f"- Revisions-Momentum (30d): {earn['revision_direction']} (netto {earn['net_revisions_30d']:+d})",
+        f"- Revisions-Momentum (7d): netto {earn['net_revisions_7d']:+d}",
+        f"- Earnings Health: {earn['earnings_health']}",
+    ])
+
+    # Sektor-Aufschlüsselung
+    by_sector = earn.get("by_sector", {})
+    if by_sector:
+        lines.append("")
+        lines.append("### Sektor-Aufschlüsselung")
+        for sector, data in by_sector.items():
+            fwd = f"FWD Growth {data['fwd_eps_growth']*100:+.1f}%" if data.get("fwd_eps_growth") is not None else "FWD Growth n/a"
+            lines.append(
+                f"- {sector}: Beat {data['beat_rate']} ({data['beat_rate_pct']:.0f}%) | "
+                f"Surprise {data['avg_surprise_pct']:+.1f}% | "
+                f"{fwd} | Revisions: {data['revision_direction']}"
+            )
+
+    # Anstehende Earnings (Event-Risiko)
+    upcoming = earn.get("upcoming", [])
+    if upcoming:
+        lines.append("")
+        lines.append("### Anstehende Earnings (Event-Risiko)")
+        for u in upcoming[:5]:
+            lines.append(f"- {u['ticker']} ({u['sector']}): {u['date']}")
+
+    # Kürzlich gemeldet
+    recently = earn.get("recently_reported", [])
+    if recently:
+        lines.append("")
+        lines.append("### Kürzlich gemeldet")
+        for r in recently[:5]:
+            lines.append(f"- {r['ticker']} ({r['sector']}): Surprise {r['surprise_pct']:+.1f}%")
+
+    return lines
+
+
 def build_signals_context(market: dict, mech_signals: dict, mech_score: int) -> list[str]:
     """Build mechanical signals summary lines."""
     vix = market["vix"]
@@ -284,10 +338,244 @@ def build_user_prompt(
     research syntheses, and news context into a single prompt string.
     """
     lines = build_market_context(market)
+    lines.extend(build_earnings_context(market))
     lines.extend(build_signals_context(market, mech_signals, mech_score))
     lines.extend(build_history_context(history))
     lines.extend(build_theses_context(theses))
     lines.extend(build_research_context(researches or []))
     lines.extend(build_news_context(news_results or []))
+
+    return "\n".join(lines)
+
+
+# ── Per-Stage Prompt Builders (Multi-Stage Architecture) ─────────────────
+
+
+def _filter_researches_for(researches: list, target: str) -> list:
+    """Filter researches that are assigned to a specific ampel target."""
+    if not researches:
+        return []
+    return [r for r in researches if target in (r.get("ampel_targets") or [])]
+
+
+def build_trend_analyst_prompt(market: dict, mech_signals: dict, researches: Optional[list] = None) -> str:
+    """Build user prompt for the Trend signal analyst."""
+    lines = [
+        f"Bewerte das Trend-Signal für {datetime.now().strftime('%Y-%m-%d')}.",
+        "",
+        "## MARKTDATEN",
+        f"- IWDA Kurs: {market['price']}€ | SMA50: {market['sma50']}€ | SMA200: {market['sma200']}€",
+        f"- ATH: {market['ath']}€ | Delta ATH: {market['delta_ath_pct']}%",
+        f"- Puffer SMA50: {market['puffer_sma50_pct']}%",
+        f"- Golden Cross: {'Ja' if market['golden_cross'] else 'Nein'}",
+        "",
+        "## MECHANISCHES SIGNAL",
+        f"- Trend: {mech_signals['trend']} (Kurs {'über' if market['price'] > market['sma50'] else 'unter'} SMA50)",
+    ]
+
+    sr = market.get("sector_rotation")
+    if sr and sr.get("risk_on_vs_off") is not None:
+        lines.append(f"- Risk-On vs. Defensive Spread: {sr['risk_on_vs_off']:+.2f}pp")
+
+    reg = market.get("regional")
+    if reg:
+        if reg.get("spy_perf_1m") is not None:
+            lines.append(f"- USA (SPY) 1M: {reg['spy_perf_1m']:+.2f}%")
+        if reg.get("ezu_perf_1m") is not None:
+            lines.append(f"- Europa (EZU) 1M: {reg['ezu_perf_1m']:+.2f}%")
+
+    seas = market.get("seasonality")
+    if seas:
+        lines.append(f"- Saisonaler Bias: {seas['seasonal_bias']} (avg {seas['avg_return_pct']:+.2f}%)")
+
+    targeted = _filter_researches_for(researches or [], "trend")
+    lines.extend(build_research_context(targeted))
+
+    return "\n".join(lines)
+
+
+def build_volatility_analyst_prompt(market: dict, mech_signals: dict, researches: Optional[list] = None) -> str:
+    """Build user prompt for the Volatility signal analyst."""
+    vix = market["vix"]
+    lines = [
+        f"Bewerte das Volatilitäts-Signal für {datetime.now().strftime('%Y-%m-%d')}.",
+        "",
+        "## MARKTDATEN",
+        f"- VIX: {vix['value']} (Vorwoche: {vix['prev_week']}, Richtung: {vix['direction']})",
+        "",
+        "## MECHANISCHES SIGNAL",
+        f"- Volatilität: {mech_signals['volatility']} (VIX {vix['value']})",
+    ]
+
+    pc = market.get("put_call")
+    if pc:
+        lines.append(f"- Put/Call Ratio: {pc['ratio']:.2f} ({pc['signal']})")
+
+    targeted = _filter_researches_for(researches or [], "volatility")
+    lines.extend(build_research_context(targeted))
+
+    return "\n".join(lines)
+
+
+def build_macro_analyst_prompt(market: dict, mech_signals: dict, researches: Optional[list] = None) -> str:
+    """Build user prompt for the Macro signal analyst."""
+    yld = market["yields"]
+    lines = [
+        f"Bewerte das Makro-Signal für {datetime.now().strftime('%Y-%m-%d')}.",
+        "",
+        "## MARKTDATEN",
+        f"- US 10Y: {yld['us10y']}% | US 2Y: {yld['us2y']}% | Spread: {yld['spread']}% ({yld['spread_direction']})",
+        f"- CPI: {yld['cpi']}% | Real Yield: {yld['real_yield']}%",
+    ]
+
+    cs = market.get("credit_spread")
+    if cs:
+        lines.append(f"- Credit Spread Proxy: {cs['spread_proxy']:+.2f}pp ({cs['direction']})")
+
+    oil = market.get("oil")
+    if oil:
+        lines.append(f"- Öl (Brent): ${oil['price']} ({oil['change_1m_pct']:+.2f}%, {oil['direction']})")
+
+    gold = market.get("gold")
+    if gold:
+        lines.append(f"- Gold: ${gold['price']} ({gold['change_1m_pct']:+.2f}%, {gold['direction']})")
+
+    dxy = market.get("dxy")
+    if dxy:
+        lines.append(f"- DXY: {dxy['value']} ({dxy['change_1m_pct']:+.2f}%, {dxy['direction']})")
+
+    eur = market.get("eurusd")
+    if eur:
+        lines.append(f"- EUR/USD: {eur['rate']:.4f} ({eur['change_1m_pct']:+.2f}%, {eur['direction']})")
+
+    lines.extend([
+        "",
+        "## MECHANISCHES SIGNAL",
+        f"- Makro: {mech_signals['macro']} (Spread {yld['spread']}%)",
+    ])
+
+    earn = market.get("earnings")
+    if earn:
+        lines.extend([
+            "",
+            "## EARNINGS-KONTEXT",
+            f"- Earnings Health: {earn['earnings_health']}",
+            f"- Beat Rate: {earn['beat_rate']} ({earn['beat_rate_pct']:.0f}%)",
+            f"- Revisions: {earn['revision_direction']}",
+        ])
+
+    targeted = _filter_researches_for(researches or [], "macro")
+    lines.extend(build_research_context(targeted))
+
+    return "\n".join(lines)
+
+
+def build_sentiment_analyst_prompt(
+    market: dict,
+    mech_signals: dict,
+    news_results: Optional[list] = None,
+    researches: Optional[list] = None,
+) -> str:
+    """Build user prompt for the Sentiment signal analyst."""
+    lines = [
+        f"Bewerte das Sentiment-Signal für {datetime.now().strftime('%Y-%m-%d')}.",
+    ]
+
+    # News context
+    lines.extend(build_news_context(news_results or []))
+
+    # Sector rotation
+    sr = market.get("sector_rotation")
+    if sr and sr.get("sectors"):
+        lines.append("")
+        lines.append("## SEKTOR-ROTATION")
+        for name, data in sr["sectors"].items():
+            lines.append(f"- {name.replace('_', ' ').title()}: {data['perf_1m']:+.2f}%")
+        if sr.get("risk_on_vs_off") is not None:
+            lines.append(f"- Risk-On vs. Defensive: {sr['risk_on_vs_off']:+.2f}pp")
+
+    # Regional
+    reg = market.get("regional")
+    if reg and reg.get("usa_vs_europe") is not None:
+        lines.append(f"- USA vs Europa: {reg['usa_vs_europe']:+.2f}pp")
+
+    # Put/Call
+    pc = market.get("put_call")
+    if pc:
+        lines.append(f"- Put/Call Ratio: {pc['ratio']:.2f} ({pc['signal']})")
+
+    # Earnings (upcoming + recently reported for event risk)
+    lines.extend(build_earnings_context(market))
+
+    targeted = _filter_researches_for(researches or [], "sentiment")
+    lines.extend(build_research_context(targeted))
+
+    return "\n".join(lines)
+
+
+def build_synthesis_prompt(
+    market: dict,
+    mech_signals: dict,
+    mech_score: int,
+    stage1_results: dict,
+    history: list,
+    theses: list,
+    researches: Optional[list] = None,
+    news_results: Optional[list] = None,
+) -> str:
+    """Build user prompt for the Synthesis stage.
+
+    Receives all 4 signal assessments from Stage 1 plus broader context
+    (history, theses, research, news) to produce the overall rating.
+    """
+    lines = [
+        f"Erstelle die Gesamt-Synthese für {datetime.now().strftime('%Y-%m-%d')}.",
+        "",
+        "## SIGNAL-BEWERTUNGEN (von spezialisierten Analysten)",
+    ]
+
+    for name in ["trend", "volatility", "macro", "sentiment"]:
+        result = stage1_results.get(name) or {}
+        ctx = result.get("context", "?")
+        note = result.get("note", "-")
+        mech = mech_signals[name] if name != "sentiment" else result.get("mechanical", "green")
+        lines.append(f"- {name.capitalize()}: mechanical={mech}, context={ctx}")
+        lines.append(f"  Begründung: {note}")
+
+        if name == "sentiment":
+            events = result.get("events", [])
+            for evt in events:
+                lines.append(
+                    f"  Event: {evt.get('headline', '?')} "
+                    f"(Auswirkung: {evt.get('affects_portfolio', '?')}, "
+                    f"Kaskadenrisiko: {evt.get('cascade_risk', '?')})"
+                )
+
+    # Mechanical score
+    sent_mech = (stage1_results.get("sentiment") or {}).get("mechanical", "green")
+    actual_score = sum(1 for n in ["trend", "volatility", "macro"] if mech_signals[n] == "green")
+    if sent_mech == "green":
+        actual_score += 1
+    lines.append(f"\n## MECHANISCHER SCORE: {actual_score}/4")
+
+    # Condensed market summary
+    vix = market["vix"]
+    yld = market["yields"]
+    lines.extend([
+        "",
+        "## MARKT-ZUSAMMENFASSUNG",
+        f"- IWDA: {market['price']}€ (ATH-Delta: {market['delta_ath_pct']}%, Puffer SMA50: {market['puffer_sma50_pct']}%)",
+        f"- VIX: {vix['value']} ({vix['direction']})",
+        f"- Spread: {yld['spread']}% ({yld['spread_direction']}) | Real Yield: {yld['real_yield']}%",
+    ])
+    cs = market.get("credit_spread")
+    if cs:
+        lines.append(f"- Credit Spread: {cs['direction']} ({cs['spread_proxy']:+.2f}pp)")
+
+    # Research, News, History, Theses
+    lines.extend(build_research_context(researches or []))
+    lines.extend(build_news_context(news_results or []))
+    lines.extend(build_history_context(history))
+    lines.extend(build_theses_context(theses))
 
     return "\n".join(lines)

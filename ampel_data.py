@@ -44,6 +44,16 @@ OIL_TICKER = "BZ=F"   # Brent Crude Oil Futures
 GOLD_TICKER = "GC=F"  # Gold Futures
 DXY_TICKER = "DX-Y.NYB"  # US Dollar Index
 
+# Top-15 MSCI World Holdings für aggregierte Earnings-Daten
+EARNINGS_TICKERS = {
+    "AAPL": "Tech", "MSFT": "Tech", "NVDA": "Tech",
+    "AMZN": "Tech", "GOOG": "Tech", "META": "Tech", "TSM": "Tech",
+    "JPM": "Financials", "V": "Financials",
+    "LLY": "Healthcare", "UNH": "Healthcare",
+    "BRK-B": "Conglomerate", "PG": "Consumer Staples",
+    "XOM": "Energy", "JNJ": "Healthcare",
+}
+
 
 # ── Daten holen ──────────────────────────────────────────────────────────
 
@@ -175,9 +185,9 @@ def fetch_yields_data(db, cpi_override=None):
     if last_spread is not None:
         diff = spread - last_spread
         if diff > 0.05:
-            spread_direction = "widening"
+            spread_direction = "rising"
         elif diff < -0.05:
-            spread_direction = "narrowing"
+            spread_direction = "falling"
         else:
             spread_direction = "flat"
     else:
@@ -565,6 +575,284 @@ def fetch_dxy():
         return None
 
 
+def fetch_earnings_aggregate():
+    """Holt aggregierte Earnings-Daten der Top-15 MSCI World Holdings.
+
+    Sammelt Beat-Rate, Forward Growth, Revisions-Momentum und Earnings-Kalender.
+    Verwendet eigenen ThreadPool für parallele Ticker-Abfragen.
+
+    Returns:
+        dict mit beat_rate, fwd_eps_growth, revision_direction, by_sector etc.
+        — oder None bei Fehler.
+    """
+    import pandas as pd
+
+    def _fetch_ticker_data(sym):
+        """Holt Earnings-Daten für einen einzelnen Ticker."""
+        t = yf.Ticker(sym)
+        data = {}
+
+        # Earnings History (letzte 4 Quartale: actual vs estimate)
+        try:
+            eh = t.earnings_history
+            if eh is not None and not eh.empty:
+                data["earnings_history"] = eh
+        except Exception:
+            pass
+
+        # Forward EPS Estimates
+        try:
+            ee = t.earnings_estimate
+            if ee is not None and not ee.empty:
+                data["earnings_estimate"] = ee
+        except Exception:
+            pass
+
+        # EPS Revisions (up/down in 7d/30d)
+        try:
+            er = t.eps_revisions
+            if er is not None and not er.empty:
+                data["eps_revisions"] = er
+        except Exception:
+            pass
+
+        # Revenue Estimates
+        try:
+            re_ = t.revenue_estimate
+            if re_ is not None and not re_.empty:
+                data["revenue_estimate"] = re_
+        except Exception:
+            pass
+
+        # Calendar (next earnings date)
+        try:
+            cal = t.calendar
+            if cal is not None:
+                data["calendar"] = cal
+        except Exception:
+            pass
+
+        return data
+
+    try:
+        # Parallel fetch für alle Ticker
+        results = {}
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(_fetch_ticker_data, sym): sym
+                       for sym in EARNINGS_TICKERS}
+            for future in as_completed(futures):
+                sym = futures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        results[sym] = result
+                except Exception as e:
+                    log.warning("Earnings %s fehlgeschlagen: %s", sym, e)
+
+        if not results:
+            log.warning("Earnings: keine Ticker-Daten erhalten")
+            return None
+
+        # ── Aggregation ──
+
+        # Beat Rate aus earnings_history
+        total_beats = 0
+        total_quarters = 0
+        surprises = []
+        recently_reported = []
+        today = datetime.now()
+
+        sector_data = {}  # sector -> {beats, quarters, surprises, ...}
+
+        for sym, data in results.items():
+            sector = EARNINGS_TICKERS[sym]
+            if sector not in sector_data:
+                sector_data[sector] = {
+                    "beats": 0, "quarters": 0, "surprises": [],
+                    "fwd_eps_growths": [], "rev_up_7d": 0, "rev_down_7d": 0,
+                    "rev_up_30d": 0, "rev_down_30d": 0, "tickers": [],
+                }
+            sd = sector_data[sector]
+            sd["tickers"].append(sym)
+
+            eh = data.get("earnings_history")
+            if eh is not None and not eh.empty:
+                for _, row in eh.iterrows():
+                    actual = row.get("epsActual")
+                    estimate = row.get("epsEstimate")
+                    if pd.notna(actual) and pd.notna(estimate) and estimate != 0:
+                        total_quarters += 1
+                        sd["quarters"] += 1
+                        surprise_pct = round(((actual - estimate) / abs(estimate)) * 100, 1)
+                        surprises.append(surprise_pct)
+                        sd["surprises"].append(surprise_pct)
+                        if actual >= estimate:
+                            total_beats += 1
+                            sd["beats"] += 1
+
+                # Letztes Quartal für recently_reported
+                last_row = eh.iloc[0] if len(eh) > 0 else None
+                if last_row is not None:
+                    q_date = eh.index[0] if hasattr(eh.index[0], 'strftime') else None
+                    actual = last_row.get("epsActual")
+                    estimate = last_row.get("epsEstimate")
+                    if q_date and pd.notna(actual) and pd.notna(estimate) and estimate != 0:
+                        surprise = round(((actual - estimate) / abs(estimate)) * 100, 1)
+                        recently_reported.append({
+                            "ticker": sym,
+                            "date": q_date.strftime("%Y-%m-%d") if hasattr(q_date, 'strftime') else str(q_date),
+                            "surprise_pct": surprise,
+                            "sector": sector,
+                        })
+
+            # Forward EPS Growth aus earnings_estimate
+            # DataFrame: Index=period (0q, +1q, 0y, +1y), Spalten inkl. 'growth'
+            ee = data.get("earnings_estimate")
+            if ee is not None and not ee.empty:
+                try:
+                    if "growth" in ee.columns and "0y" in ee.index:
+                        growth_val = ee.loc["0y", "growth"]
+                        if pd.notna(growth_val):
+                            sd["fwd_eps_growths"].append(float(growth_val))
+                except Exception:
+                    pass
+
+            # EPS Revisions
+            # DataFrame: Index=period (0q, +1q, 0y, +1y),
+            # Spalten: upLast7days, upLast30days, downLast30days, downLast7Days
+            er = data.get("eps_revisions")
+            if er is not None and not er.empty:
+                try:
+                    # Summiere über relevante Perioden (0q + 0y)
+                    for period in ["0q", "0y"]:
+                        if period not in er.index:
+                            continue
+                        row = er.loc[period]
+                        if "upLast7days" in er.columns and pd.notna(row.get("upLast7days")):
+                            sd["rev_up_7d"] += int(row["upLast7days"])
+                        if "downLast7Days" in er.columns and pd.notna(row.get("downLast7Days")):
+                            sd["rev_down_7d"] += int(row["downLast7Days"])
+                        if "upLast30days" in er.columns and pd.notna(row.get("upLast30days")):
+                            sd["rev_up_30d"] += int(row["upLast30days"])
+                        if "downLast30days" in er.columns and pd.notna(row.get("downLast30days")):
+                            sd["rev_down_30d"] += int(row["downLast30days"])
+                except Exception:
+                    pass
+
+        # ── Gesamt-Aggregation ──
+
+        beat_rate_pct = round((total_beats / total_quarters * 100), 1) if total_quarters > 0 else 0
+        avg_surprise = round(sum(surprises) / len(surprises), 1) if surprises else 0
+
+        # Forward EPS Growth (Durchschnitt aller Ticker mit Daten)
+        all_fwd_growths = []
+        for sd in sector_data.values():
+            all_fwd_growths.extend(sd["fwd_eps_growths"])
+        fwd_eps_growth_0y = round(sum(all_fwd_growths) / len(all_fwd_growths), 3) if all_fwd_growths else None
+
+        # Revisions-Momentum
+        total_rev_up_7d = sum(sd["rev_up_7d"] for sd in sector_data.values())
+        total_rev_down_7d = sum(sd["rev_down_7d"] for sd in sector_data.values())
+        total_rev_up_30d = sum(sd["rev_up_30d"] for sd in sector_data.values())
+        total_rev_down_30d = sum(sd["rev_down_30d"] for sd in sector_data.values())
+        net_rev_7d = total_rev_up_7d - total_rev_down_7d
+        net_rev_30d = total_rev_up_30d - total_rev_down_30d
+
+        if net_rev_30d > 5:
+            rev_direction = "rising"
+        elif net_rev_30d < -5:
+            rev_direction = "falling"
+        else:
+            rev_direction = "flat"
+
+        # Earnings Health
+        if beat_rate_pct >= 75 and rev_direction == "rising" and (fwd_eps_growth_0y or 0) > 0.10:
+            earnings_health = "strong"
+        elif beat_rate_pct >= 75 and rev_direction != "falling":
+            earnings_health = "moderate"
+        elif beat_rate_pct >= 60 and rev_direction != "falling":
+            earnings_health = "moderate"
+        elif rev_direction == "falling" or beat_rate_pct < 60:
+            earnings_health = "weak"
+        else:
+            earnings_health = "moderate"
+
+        if rev_direction == "falling" and beat_rate_pct < 70:
+            earnings_health = "deteriorating"
+
+        # Sektor-Zusammenfassung
+        by_sector = {}
+        for sector, sd in sector_data.items():
+            s_beat_pct = round((sd["beats"] / sd["quarters"] * 100), 1) if sd["quarters"] > 0 else 0
+            s_surprise = round(sum(sd["surprises"]) / len(sd["surprises"]), 1) if sd["surprises"] else 0
+            s_fwd = round(sum(sd["fwd_eps_growths"]) / len(sd["fwd_eps_growths"]), 3) if sd["fwd_eps_growths"] else None
+            s_net_rev = (sd["rev_up_30d"] - sd["rev_down_30d"])
+            s_rev_dir = "rising" if s_net_rev > 2 else ("falling" if s_net_rev < -2 else "flat")
+
+            by_sector[sector] = {
+                "beat_rate": f"{sd['beats']}/{sd['quarters']}",
+                "beat_rate_pct": s_beat_pct,
+                "avg_surprise_pct": s_surprise,
+                "fwd_eps_growth": s_fwd,
+                "revision_direction": s_rev_dir,
+                "tickers": sd["tickers"],
+            }
+
+        # Upcoming Earnings aus Calendar
+        upcoming = []
+        today_date = today.date()
+        for sym, data in results.items():
+            cal = data.get("calendar")
+            if cal is not None:
+                try:
+                    # calendar ist ein dict, Earnings Date ist eine Liste von date-Objekten
+                    if isinstance(cal, dict):
+                        ed_list = cal.get("Earnings Date", [])
+                    else:
+                        ed_list = []
+
+                    if not isinstance(ed_list, (list, tuple)):
+                        ed_list = [ed_list]
+
+                    for d in ed_list:
+                        if hasattr(d, 'strftime') and d > today_date:
+                            upcoming.append({
+                                "ticker": sym,
+                                "date": d.strftime("%Y-%m-%d"),
+                                "sector": EARNINGS_TICKERS[sym],
+                            })
+                            break
+                except Exception:
+                    pass
+
+        upcoming.sort(key=lambda x: x["date"])
+        recently_reported.sort(key=lambda x: x["date"], reverse=True)
+
+        result = {
+            "beat_rate": f"{total_beats}/{total_quarters}",
+            "beat_rate_pct": beat_rate_pct,
+            "avg_surprise_pct": avg_surprise,
+            "fwd_eps_growth_0y": fwd_eps_growth_0y,
+            "net_revisions_7d": net_rev_7d,
+            "net_revisions_30d": net_rev_30d,
+            "revision_direction": rev_direction,
+            "earnings_health": earnings_health,
+            "by_sector": by_sector,
+            "upcoming": upcoming[:5],
+            "recently_reported": recently_reported[:5],
+            "tickers_loaded": len(results),
+        }
+
+        log.info("Earnings: %d/%d Ticker, Beat %s (%.0f%%), Health: %s, Revisions: %s",
+                 len(results), len(EARNINGS_TICKERS),
+                 result["beat_rate"], beat_rate_pct, earnings_health, rev_direction)
+        return result
+
+    except Exception as e:
+        log.warning("Earnings-Aggregation fehlgeschlagen: %s", e)
+        return None
+
+
 def fetch_all_market_data(db, cpi_override=None):
     """Holt alle Marktdaten und gibt das vollständige market-Dict zurück."""
     # Core-Daten (sequentiell — kritisch)
@@ -574,7 +862,7 @@ def fetch_all_market_data(db, cpi_override=None):
 
     # Erweiterte Daten (parallel — alle optional)
     extended = {}
-    with ThreadPoolExecutor(max_workers=9) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {
             executor.submit(fetch_sector_rotation): "sector_rotation",
             executor.submit(fetch_regional_comparison): "regional",
@@ -585,6 +873,7 @@ def fetch_all_market_data(db, cpi_override=None):
             executor.submit(fetch_oil): "oil",
             executor.submit(fetch_gold): "gold",
             executor.submit(fetch_dxy): "dxy",
+            executor.submit(fetch_earnings_aggregate): "earnings",
         }
         for future in as_completed(futures):
             key = futures[future]

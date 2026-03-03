@@ -7,6 +7,7 @@ export const API_ENDPOINTS = {
     UPDATE_THESIS: (id: string) => `/ampel/theses/${id}`,
     REFINE_THESIS: '/ampel/theses/refine',
     PROMPTS: '/ampel/prompts',
+    RUN: '/ampel/run',
   },
   PRICES: {
     WATCHLIST: '/prices/watchlist',

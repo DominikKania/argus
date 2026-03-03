@@ -1,5 +1,7 @@
 export type ResearchStatus = 'draft' | 'ready' | 'running' | 'completed' | 'error'
 
+export type AmpelTarget = 'trend' | 'volatility' | 'macro' | 'sentiment'
+
 export interface Research {
   _id: string
   topic: string
@@ -12,4 +14,5 @@ export interface Research {
   created_date: string
   updated_date: string
   last_run_date: string | null
+  ampel_targets?: AmpelTarget[]
 }

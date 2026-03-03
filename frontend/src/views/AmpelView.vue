@@ -43,6 +43,9 @@
       <!-- Market Data -->
       <MarketDataCard :market="analysis.market" />
 
+      <!-- Earnings -->
+      <EarningsCard v-if="analysis.market.earnings" :earnings="analysis.market.earnings" />
+
       <!-- Market Context (LLM-Interpretation der erweiterten Daten) -->
       <MarketContextCard v-if="analysis.market_context" :context="analysis.market_context" />
 
@@ -57,9 +60,6 @@
         <ThesisCard v-if="analysis.thesis" :thesis="analysis.thesis" />
         <RecommendationCard :analysis="analysis" />
       </div>
-
-      <!-- Prompt Module (Research, News, Analyse-Prompt) -->
-      <PromptModule />
     </template>
   </div>
 </template>
@@ -72,11 +72,11 @@ import Button from 'primevue/button'
 import AmpelHeader from '@/components/features/ampel/AmpelHeader.vue'
 import SignalCard from '@/components/features/ampel/SignalCard.vue'
 import MarketDataCard from '@/components/features/ampel/MarketDataCard.vue'
+import EarningsCard from '@/components/features/ampel/EarningsCard.vue'
 import MarketContextCard from '@/components/features/ampel/MarketContextCard.vue'
 import SentimentEvents from '@/components/features/ampel/SentimentEvents.vue'
 import ThesisCard from '@/components/features/ampel/ThesisCard.vue'
 import RecommendationCard from '@/components/features/ampel/RecommendationCard.vue'
-import PromptModule from '@/components/features/ampel/PromptModule.vue'
 
 const ampelStore = useAmpelStore()
 const analysis = computed(() => ampelStore.latestAnalysis)
@@ -178,12 +178,10 @@ onMounted(() => {
 
 // Gap between cards
 .ampel-view > :deep(.market-data-card),
+.ampel-view > :deep(.earnings-card),
 .ampel-view > :deep(.market-context-card),
 .ampel-view > :deep(.sentiment-events) {
   margin-bottom: 1.5rem;
 }
 
-.ampel-view > :deep(.prompt-module) {
-  margin-top: 1.5rem;
-}
 </style>

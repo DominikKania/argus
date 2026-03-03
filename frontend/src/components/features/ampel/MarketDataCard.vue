@@ -167,21 +167,24 @@
           <div class="ext-tile-header">
             <span class="ext-tile-label">Credit Spread</span>
             <span class="ext-tile-value" :class="creditSpreadClass">
-              {{ formatSigned(market.credit_spread.spread_proxy) }}pp
+              <template v-if="market.credit_spread.spread_proxy != null">
+                {{ formatSigned(market.credit_spread.spread_proxy) }}pp
+              </template>
+              <template v-else>n/a</template>
               <i :class="creditSpreadIcon" class="direction-arrow" />
             </span>
           </div>
           <div class="sector-details">
             <div class="sector-item">
               <span class="sector-name">HYG (High Yield)</span>
-              <span class="sector-perf" :class="market.credit_spread.hyg_perf_1m >= 0 ? 'perf-pos' : 'perf-neg'">
-                {{ formatSigned(market.credit_spread.hyg_perf_1m) }}%
+              <span class="sector-perf" :class="(market.credit_spread.hyg_perf_1m ?? 0) >= 0 ? 'perf-pos' : 'perf-neg'">
+                {{ market.credit_spread.hyg_perf_1m != null ? formatSigned(market.credit_spread.hyg_perf_1m) + '%' : 'n/a' }}
               </span>
             </div>
             <div class="sector-item">
               <span class="sector-name">LQD (Inv. Grade)</span>
-              <span class="sector-perf" :class="market.credit_spread.lqd_perf_1m >= 0 ? 'perf-pos' : 'perf-neg'">
-                {{ formatSigned(market.credit_spread.lqd_perf_1m) }}%
+              <span class="sector-perf" :class="(market.credit_spread.lqd_perf_1m ?? 0) >= 0 ? 'perf-pos' : 'perf-neg'">
+                {{ market.credit_spread.lqd_perf_1m != null ? formatSigned(market.credit_spread.lqd_perf_1m) + '%' : 'n/a' }}
               </span>
             </div>
           </div>

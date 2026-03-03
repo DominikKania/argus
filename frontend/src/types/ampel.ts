@@ -52,14 +52,45 @@ export interface EurUsd {
 export interface CreditSpread {
   hyg_price: number
   lqd_price: number
-  hyg_perf_1m: number
-  lqd_perf_1m: number
-  spread_proxy: number
+  hyg_perf_1m: number | null
+  lqd_perf_1m: number | null
+  spread_proxy: number | null
   direction: 'widening' | 'narrowing' | 'flat'
 }
 
 export interface MarketContext {
   [key: string]: string | undefined
+}
+
+export interface EarningsSectorData {
+  beat_rate: string
+  beat_rate_pct: number
+  avg_surprise_pct: number
+  fwd_eps_growth: number | null
+  revision_direction: 'rising' | 'flat' | 'falling'
+  tickers: string[]
+}
+
+export interface EarningsEvent {
+  ticker: string
+  date: string
+  sector: string
+  surprise_pct?: number
+}
+
+export interface EarningsData {
+  beat_rate: string
+  beat_rate_pct: number
+  avg_surprise_pct: number
+  fwd_eps_growth_0y: number | null
+  net_revisions_7d: number
+  net_revisions_30d: number
+  revision_direction: 'rising' | 'flat' | 'falling'
+  earnings_health: 'strong' | 'moderate' | 'weak' | 'deteriorating'
+  by_sector: Record<string, EarningsSectorData>
+  upcoming: EarningsEvent[]
+  recently_reported: EarningsEvent[]
+  tickers_loaded: number
 }
 
 export interface MarketData {
@@ -78,6 +109,7 @@ export interface MarketData {
   put_call?: PutCallRatio | null
   eurusd?: EurUsd | null
   credit_spread?: CreditSpread | null
+  earnings?: EarningsData | null
 }
 
 export type SignalColor = 'green' | 'yellow' | 'red'
@@ -125,23 +157,15 @@ export interface Thesis {
   expected_if_negative?: string
 }
 
-export interface SimplifiedTexts {
-  rating_reasoning: string
-  recommendation_detail: string
-  escalation_trigger: string
-  signal_notes: Record<string, string>
-  sentiment_events: Array<{ headline: string; summary: string }>
-  thesis?: {
-    statement: string
-    catalyst: string
-    expected_if_positive: string
-    expected_if_negative: string
-  }
+export interface StagePrompt {
+  system: string
+  user: string
 }
 
 export interface AnalysisPrompts {
   system: string
   user: string
+  stages?: Record<string, StagePrompt>
 }
 
 export interface Analysis {
@@ -157,7 +181,6 @@ export interface Analysis {
   escalation_trigger?: string
   crash_rule_active?: boolean
   market_context?: MarketContext | null
-  simplified?: SimplifiedTexts
 }
 
 export interface OpenThesis {

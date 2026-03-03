@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vollautomatische Ampel-Analyse: Daten holen → Claude API → validieren → speichern."""
+"""Vollautomatische Ampel-Analyse: Mehrstufige Pipeline mit parallelen Signal-Analysten."""
 
 import io
 import json
@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -15,7 +16,13 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from ampel_data import fetch_all_market_data, calculate_mechanical_signals
-from backend.prompt_builder import build_user_prompt
+from backend.prompt_builder import (
+    build_trend_analyst_prompt,
+    build_volatility_analyst_prompt,
+    build_macro_analyst_prompt,
+    build_sentiment_analyst_prompt,
+    build_synthesis_prompt,
+)
 
 # Force UTF-8 output on Windows
 if sys.stdout.encoding != "utf-8":
@@ -63,44 +70,136 @@ def get_llm_client():
         return "openai", OpenAI(**kwargs), model
 
 
-# ── Prompt-Konstruktion ──────────────────────────────────────────────────
+# ── Stage 1: Signal-Analyst Prompts ──────────────────────────────────────
 
-SYSTEM_PROMPT = """\
-Du bist der Ampel-Analyst des Argus Investment-Systems. Du erhältst quantitative Marktdaten \
-(via yfinance API) und berechnete mechanische Signale.
+TREND_ANALYST_PROMPT = """\
+Du bist der Trend-Analyst des Argus Investment-Systems.
 
 ## PORTFOLIO
-Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+iShares Core MSCI World UCITS ETF USD (Acc) — ~6.700\u20ac, 100% Allokation
 
 ## DEINE AUFGABE
-1. Bewerte den Kontext-Layer für jedes Signal (kann vom mechanischen Signal abweichen)
-2. Identifiziere die 3 wichtigsten Sentiment-Events basierend auf deinem aktuellen Marktwissen
-3. Bestimme das Sentiment-Signal (mechanisch + Kontext)
-4. Erstelle die Gesamtbewertung (Overall Rating)
-5. Formuliere eine Empfehlung
-6. Erstelle optional eine These mit Katalysator (max. 4-6 Wochen Zeithorizont!)
-7. Setze Eskalations-Trigger und Crash-Regel
+Bewerte den Kontext-Layer des Trend-Signals. Das mechanische Signal basiert nur auf \
+Kurs vs. SMA50. Du bewertest den breiteren Kontext.
 
-## SIGNAL-REGELN
+## REGELN
+- Puffer Kurs\u2194SMA50: <2% = fragil, >5% = solide
+- Golden Cross (SMA50 > SMA200) = Aufw\u00e4rtstrend best\u00e4tigt
+- Kurs \u00fcber SMA50 aber unter SMA200 \u2192 "Erholung im Abw\u00e4rtstrend" = gelb
+- Sektor-Rotation und regionale Daten als Zusatzkontext
+- Saisonalit\u00e4t ist kein Signal allein, nur Kontext
 
-### Trend (Kontext-Layer)
-- Puffer Kurs↔SMA50: <2% = fragil, >5% = solide
-- Golden Cross (SMA50 > SMA200) = Aufwärtstrend bestätigt
-- Kurs über SMA50 aber unter SMA200 → "Erholung im Abwärtstrend" = gelb
+## AUSGABE
+Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
+{
+  "context": "green|yellow|red",
+  "note": "1-2 S\u00e4tze Begr\u00fcndung in einfachem Deutsch, keine Fachk\u00fcrzel"
+}
+"""
 
-### Volatilität (Kontext-Layer)
+VOLATILITY_ANALYST_PROMPT = """\
+Du bist der Volatilit\u00e4ts-Analyst des Argus Investment-Systems.
+
+## PORTFOLIO
+iShares Core MSCI World UCITS ETF USD (Acc) — ~6.700\u20ac, 100% Allokation
+
+## DEINE AUFGABE
+Bewerte den Kontext-Layer des Volatilit\u00e4ts-Signals.
+
+## REGELN
 - VIX <13 allein ist KEIN automatisches Rot
-- Prüfe ob VIX für "underpriced" gehalten wird
+- Pr\u00fcfe ob VIX f\u00fcr "underpriced" gehalten wird (versteckte Risiken bei niedrigem VIX)
+- VIX-Richtung beachten: steigend von niedrigem Niveau = fr\u00fche Warnung
+- Put/Call Ratio als Kontr\u00e4r-Indikator: >1.2 = hohe Angst, <0.7 = hohe Gier
 
-### Makro (Kontext-Layer)
-- Spread-Richtung: Wird er enger oder weiter? (Trend > Snapshot)
-- Real Yield >2.5% = restriktiv für Aktien
+## AUSGABE
+Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
+{
+  "context": "green|yellow|red",
+  "note": "1-2 S\u00e4tze in einfachem Deutsch, keine Fachk\u00fcrzel"
+}
+"""
+
+MACRO_ANALYST_PROMPT = """\
+Du bist der Makro-Analyst des Argus Investment-Systems.
+
+## PORTFOLIO
+iShares Core MSCI World UCITS ETF USD (Acc) — ~6.700\u20ac, 100% Allokation
+
+## DEINE AUFGABE
+Bewerte den Kontext-Layer des Makro-Signals.
+
+## REGELN
+- Spread-Richtung wichtiger als Snapshot: Wird er enger oder weiter?
+- Real Yield >2.5% = restriktiv f\u00fcr Aktien
 - CPI-Trend: steigend/fallend/stagnierend
+- Credit Spread Widening >2pp = fr\u00fches Warnsignal f\u00fcr Marktschw\u00e4che
+- Credit Spreads sind Fr\u00fchindikator \u2014 sie weiten sich VOR Aktienmarktkorrekturen
+- Earnings Health st\u00fctzt oder schw\u00e4cht die Makro-Einsch\u00e4tzung
+- EUR/USD: USD-St\u00e4rke = oft Risk-Off; starke Aufwertung >3% in 1M belastet EM und Multis
+- \u00d6l und Gold als Inflations-/Risiko-Indikatoren
 
-### Sentiment
-- 3 wichtigste Nachrichten der letzten 48h die das Portfolio betreffen
-- Kaskadenrisiko bewerten: Kann es über den direkten Effekt hinaus eskalieren?
-- HINWEIS: Du hast keinen Web-Zugang. Bewerte basierend auf deinem aktuellen Marktwissen.
+## AUSGABE
+Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
+{
+  "context": "green|yellow|red",
+  "note": "1-2 S\u00e4tze in einfachem Deutsch, keine Fachk\u00fcrzel"
+}
+"""
+
+SENTIMENT_ANALYST_PROMPT = """\
+Du bist der Sentiment-Analyst des Argus Investment-Systems.
+
+## PORTFOLIO
+iShares Core MSCI World UCITS ETF USD (Acc) — ~6.700\u20ac, 100% Allokation
+IWDA hat ~70% US-Gewichtung \u2014 US-Schw\u00e4che trifft st\u00e4rker als Europa-Schw\u00e4che.
+
+## DEINE AUFGABE
+1. Bestimme das mechanische Sentiment-Signal (green/yellow/red)
+2. Bewerte den Kontext-Layer
+3. Identifiziere die 3 wichtigsten Events der letzten 48h die das Portfolio betreffen
+
+## REGELN
+- Kaskadenrisiko bewerten: Kann ein Event \u00fcber den direkten Effekt hinaus eskalieren?
+- Put/Call Ratio als Kontr\u00e4r-Indikator einbeziehen
+- Sektor-Rotation: Risk-On vs Defensive Spread beachten
+- Anstehende Mega-Cap Earnings = Event-Risiko (Unsicherheit vor Zahlen)
+- HINWEIS: Du hast keinen Web-Zugang. Bewerte basierend auf deinem aktuellen Marktwissen \
+und den bereitgestellten News-Daten.
+
+## VERST\u00c4NDLICHKEIT
+Alle Texte in einfachem Deutsch. KEINE Fachk\u00fcrzel, Paragraphen-Nummern oder \
+Gesetzesbezeichnungen. Stattdessen in einfachen Worten erkl\u00e4ren.
+
+## AUSGABE
+Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
+{
+  "mechanical": "green|yellow|red",
+  "context": "green|yellow|red",
+  "note": "1-2 S\u00e4tze",
+  "events": [
+    { "headline": "...", "summary": "...", "affects_portfolio": "direct|sector_only|indirect", "cascade_risk": "low|medium|high", "is_primary": true },
+    { "headline": "...", "summary": "...", "affects_portfolio": "...", "cascade_risk": "...", "is_primary": false },
+    { "headline": "...", "summary": "...", "affects_portfolio": "...", "cascade_risk": "...", "is_primary": false }
+  ]
+}
+"""
+
+# ── Stage 2: Synthesis Prompt ────────────────────────────────────────────
+
+SYNTHESIS_PROMPT = """\
+Du bist der Chef-Analyst des Argus Investment-Systems. Du erh\u00e4ltst die Bewertungen \
+von 4 spezialisierten Signal-Analysten und erstellst die Gesamtbewertung.
+
+## PORTFOLIO
+iShares Core MSCI World UCITS ETF USD (Acc) — ~6.700\u20ac, 100% Allokation
+
+## DEINE AUFGABE
+1. Erstelle das Overall Rating basierend auf den 4 Signal-Bewertungen
+2. Formuliere eine Empfehlung
+3. Erstelle optional eine These (max. 4-6 Wochen Zeithorizont!)
+4. Setze Eskalations-Trigger und Crash-Regel
+5. Erg\u00e4nze Markt-Kontext-Notizen
 
 ## OVERALL RATING
 - GREEN: 4/4 oder 3/4 mit stabilem Kontext
@@ -110,84 +209,35 @@ Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6
 - RED: 0-1/4 mit mehreren Warnungen
 - RED_CAPITULATION: 0/4 mit Panik-Indikatoren
 
-## ERWEITERTE MARKTDATEN
-
-### Sektor-Rotation
-- Risk-On vs. Defensive Spread > 0 = offensiver Markt (Tech, Financials, Industrials führen)
-- Risk-On vs. Defensive Spread < 0 = defensiver Markt (Healthcare, Utilities, Consumer Staples führen)
-- Extreme Divergenz (>5pp) kann Überhitzung oder Panik signalisieren
-- Berücksichtige dies bei der Kontext-Bewertung von Trend und Sentiment
-
-### Regionaler Vergleich (Europa vs USA)
-- IWDA hat ~70% US-Gewichtung — US-Schwäche trifft stärker als Europa-Schwäche
-- Divergenz USA/Europa kann auf regionsspezifische Risiken hinweisen
-- Beide schwach = breite globale Schwäche → ernstes Signal
-
-### Saisonalität
-- Historische Muster sind KEIN Signal allein, nur Kontext
-- Bekanntester Effekt: "Sell in May", Jahresendrally (Nov-Jan), Oktober-Schwäche
-- Wenn saisonaler Bias mit anderen Signalen übereinstimmt → stärkt die These
-
-### Put/Call Ratio
-- >1.2 = hohe Angst (konträr: kann Kaufsignal sein wenn andere Signale grün)
-- <0.7 = hohe Gier/Euphorie (Warnsignal für mögliche Korrektur)
-- 0.7-1.2 = neutral
-- Konträr-Indikator: Extreme deuten oft auf Wendepunkt hin
-
-### EUR/USD Wechselkurs
-- EUR-Stärke (rising) kann europäische Exporte belasten, aber EUR-Assets aufwerten
-- USD-Stärke (falling) = oft Risk-Off Signal, da USD als Safe Haven fungiert
-- Starke USD-Aufwertung (>3% in 1M) kann EM-Märkte und multinationale US-Unternehmen belasten
-- IWDA ist USD-denominiert (Acc) — Währungsbewegung beeinflusst EUR-Anleger direkt
-- Berücksichtige dies bei der Kontext-Bewertung von Makro und Trend
-
-### Credit Spread (HYG vs LQD)
-- Spread-Proxy: HYG-Performance minus LQD-Performance über 1 Monat
-- Positiv (narrowing) = Risk-On, High Yield outperformt = Risikobereitschaft hoch
-- Negativ (widening) = Risk-Off, Investment Grade outperformt = Flucht in Qualität
-- Starkes Widening (>2pp) ist frühes Warnsignal für breitere Marktschwäche
-- Credit Spreads sind oft Frühindikator — sie weiten sich VOR Aktienmarktkorrekturen
-- Berücksichtige dies bei der Kontext-Bewertung von Makro und Sentiment
-
-### Marktbreite (aus deinem Wissen)
-- Bewerte A/D-Line, New Highs/Lows basierend auf aktuellen Berichten
-- Divergenz (Index steigt, Marktbreite sinkt) ist klassisches Warnsignal
-- ETF-Flows und Margin Debt: Erwähne wenn bedeutsam, ignoriere wenn unklar
-
 ## CRASH-REGEL
-Bei VIX >35 UND Kurs >10% unter SMA200 → kein aktiver Re-Entry
+Bei VIX >35 UND Kurs >10% unter SMA200 \u2192 kein aktiver Re-Entry
+
+## ZUS\u00c4TZLICHER KONTEXT (aus deinem Marktwissen)
+Bewerte folgende Punkte f\u00fcr die market_context Notizen:
+- Marktbreite (A/D-Line, New Highs/Lows): Gesund oder divergiert sie vom Index?
+- ETF-Flows und Margin Debt: Erw\u00e4hne wenn bedeutsam
+
+## VERST\u00c4NDLICHKEIT
+Alle Texte in einfachem Deutsch. KEINE Fachk\u00fcrzel, Paragraphen-Nummern oder \
+Gesetzesbezeichnungen. Stattdessen in einfachen Worten erkl\u00e4ren.
 
 ## AUSGABE
-Antworte AUSSCHLIESSLICH mit einem JSON-Objekt. Kein Text davor oder danach. Kein Markdown.
-Verwende exakt dieses Schema:
-
+Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
 {
-  "signals": {
-    "trend":      { "mechanical": "green|red",        "context": "green|yellow|red", "note": "..." },
-    "volatility": { "mechanical": "green|yellow|red",  "context": "green|yellow|red", "note": "..." },
-    "macro":      { "mechanical": "green|red",         "context": "green|yellow|red", "note": "..." },
-    "sentiment":  { "mechanical": "green|yellow|red",  "context": "green|yellow|red", "note": "..." }
-  },
   "rating": {
-    "mechanical_score": 0,
     "overall": "GREEN|GREEN_FRAGILE|YELLOW|YELLOW_BEARISH|RED|RED_CAPITULATION",
     "reasoning": "..."
   },
-  "sentiment_events": [
-    { "headline": "...", "summary": "...", "affects_portfolio": "direct|sector_only|indirect", "cascade_risk": "low|medium|high", "is_primary": true },
-    { "headline": "...", "summary": "...", "affects_portfolio": "...", "cascade_risk": "...", "is_primary": false },
-    { "headline": "...", "summary": "...", "affects_portfolio": "...", "cascade_risk": "...", "is_primary": false }
-  ],
   "recommendation": {
     "action": "hold|buy|partial_sell|hedge|wait",
     "detail": "..."
   },
   "thesis": {
-    "statement": "Klarer Satz in einfachem Deutsch, ohne Fachkürzel oder Gesetzesbezeichnungen",
-    "catalyst": "Was genau muss passieren? In einfachen Worten",
+    "statement": "Klarer Satz ohne Fachk\u00fcrzel",
+    "catalyst": "Was genau muss passieren?",
     "catalyst_date": "YYYY-MM-DD (max 4-6 Wochen in der Zukunft!)",
-    "expected_if_positive": "Was passiert für mein ETF wenn die These eintritt?",
-    "expected_if_negative": "Was passiert für mein ETF wenn die These nicht eintritt?"
+    "expected_if_positive": "Was passiert f\u00fcr mein ETF wenn die These eintritt?",
+    "expected_if_negative": "Was passiert f\u00fcr mein ETF wenn die These nicht eintritt?"
   },
   "escalation_trigger": "...",
   "crash_rule_active": false,
@@ -198,38 +248,25 @@ Verwende exakt dieses Schema:
     "breadth_note": "...",
     "put_call_note": "...",
     "currency_note": "...",
-    "credit_spread_note": "..."
+    "credit_spread_note": "...",
+    "earnings_note": "..."
   }
 }
 
 REGELN:
-- Alle Texte auf Deutsch, kurz und prägnant
-- VERSTÄNDLICHKEIT: Schreibe für einen interessierten Laien. KEINE Fachkürzel, Paragraphen-Nummern \
-oder Gesetzesbezeichnungen (NICHT "Section 122", "IEEPA", "Art. 122 AEUV", "FOMC" etc.). \
-Stattdessen in einfachen Worten erklären (z.B. "US-Notfallzölle" statt "Section-122-Zölle", \
-"US-Notenbank-Sitzung" statt "FOMC-Meeting")
-- Enum-Werte exakt wie angegeben (lowercase)
-- Zahlen ohne Einheiten
-- sentiment_events enthält genau 3 Einträge
+- Alle Texte auf Deutsch, kurz und pr\u00e4gnant
+- Enum-Werte exakt wie angegeben (lowercase f\u00fcr action, UPPERCASE f\u00fcr overall)
 - thesis darf null sein wenn keine neue These sinnvoll ist
-- thesis: MAXIMALER Zeithorizont 4-6 Wochen! Keine Thesen über Monate hinweg. \
-Lieber einen konkreten nächsten Schritt testen (z.B. "Reagiert die EU bis Mitte März?") \
-als ein vages Langfrist-Szenario. catalyst_date muss 2-6 Wochen in der Zukunft liegen.
-- thesis: Statement, Katalysator und Szenarien müssen ohne Vorwissen verständlich sein
-- market_context: Kurze Notizen zu erweiterten Marktdaten, nur ausfüllen wenn relevant
+- thesis: MAXIMALER Zeithorizont 4-6 Wochen! catalyst_date muss 2-6 Wochen in der Zukunft liegen.
+- thesis: Statement, Katalysator und Szenarien m\u00fcssen ohne Vorwissen verst\u00e4ndlich sein
+- market_context: Kurze Notizen, nur ausf\u00fcllen wenn relevant
 """
 
 
-# ── Claude API Aufruf ────────────────────────────────────────────────────
+# ── LLM Aufruf ──────────────────────────────────────────────────────────
 
 def call_llm(system_prompt, user_prompt, temperature=None):
-    """Ruft das konfigurierte LLM auf und gibt die Textantwort zurück.
-
-    Args:
-        system_prompt: System-Prompt
-        user_prompt: User-Prompt
-        temperature: Optional, 0.0 für deterministische Antworten
-    """
+    """Ruft das konfigurierte LLM auf und gibt die Textantwort zur\u00fcck."""
     provider_type, client, model = get_llm_client()
 
     log.info("LLM-Aufruf: provider=%s, model=%s, temperature=%s", provider_type, model, temperature)
@@ -263,17 +300,14 @@ def call_llm(system_prompt, user_prompt, temperature=None):
 
 def extract_json(text):
     """Extrahiert JSON aus LLM-Antwort (mit oder ohne Markdown-Fences)."""
-    # Versuche Markdown-Code-Block zu finden
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
     if match:
         text = match.group(1)
 
-    # Versuche das erste { ... } Objekt zu finden
     start = text.find("{")
     if start == -1:
         raise ValueError("Kein JSON-Objekt in LLM-Antwort gefunden")
 
-    # Finde das passende schließende }
     depth = 0
     for i in range(start, len(text)):
         if text[i] == "{":
@@ -283,104 +317,130 @@ def extract_json(text):
             if depth == 0:
                 return json.loads(text[start : i + 1])
 
-    raise ValueError("Unvollständiges JSON-Objekt in LLM-Antwort")
+    raise ValueError("Unvollst\u00e4ndiges JSON-Objekt in LLM-Antwort")
 
 
-# ── Einsteiger-Modus (Vereinfachung) ────────────────────────────────────
+# ── Stage 1: Signal-Analysten (parallel) ─────────────────────────────────
 
-SIMPLIFY_SYSTEM_PROMPT = """\
-Du bist ein freundlicher Erklärer für Börsen-Anfänger. Du bekommst Analyse-Texte \
-eines Investment-Systems und sollst sie in einfaches, verständliches Deutsch umschreiben.
+def call_signal_analyst(signal_name, system_prompt, user_prompt, max_retries=1):
+    """Ruft einen Signal-Analysten auf mit Retry-Logik.
 
-REGELN:
-- Erkläre JEDEN Fachbegriff in Klammern beim ersten Vorkommen:
-  - ATH = Allzeithoch (der höchste Kurs, den es je gab)
-  - SMA50/SMA200 = Durchschnittskurs der letzten 50/200 Tage
-  - Golden Cross = wenn der 50-Tage-Schnitt über den 200-Tage-Schnitt steigt (gutes Zeichen)
-  - Puffer = Abstand zwischen aktuellem Kurs und einem wichtigen Niveau
-  - VIX = Angstbarometer der Börse (niedrig = ruhig, hoch = nervös)
-  - Spread = Differenz zwischen zwei Zinssätzen
-  - Stop-Loss = Kurs bei dem man verkauft um Verluste zu begrenzen
-  - Hedge = Absicherung gegen Verluste
-  - CPI = Verbraucherpreisindex (misst die Inflation)
-  - Real Yield = Realzins (Zins minus Inflation)
-- Zahlen, Prozentwerte und Daten NICHT verändern — exakt übernehmen
-- Kurze, klare Sätze verwenden
-- Freundlicher, ermutigender Ton — kein Fachchinesisch
-- Antworte AUSSCHLIESSLICH mit einem JSON-Objekt, kein Text davor oder danach
-- Verwende exakt dieselben JSON-Schlüssel wie im Input
-"""
+    Returns:
+        dict mit context, note (und f\u00fcr sentiment: mechanical, events)
+        None bei Fehler nach allen Retries
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            llm_text = call_llm(system_prompt, user_prompt)
+            result = extract_json(llm_text)
+            log.info("Stage 1 %s: context=%s", signal_name, result.get("context"))
+            return result
+        except Exception as e:
+            if attempt < max_retries:
+                log.warning("Stage 1 %s Versuch %d fehlgeschlagen: %s — Retry...",
+                            signal_name, attempt + 1, e)
+                continue
+            log.error("Stage 1 %s endg\u00fcltig fehlgeschlagen: %s — Fallback auf mechanisches Signal",
+                      signal_name, e)
+            return None
 
 
-def simplify_analysis(analysis):
-    """Vereinfacht alle Textfelder einer Analyse für den Einsteiger-Modus."""
+def run_stage1(market, mech_signals, news_results, researches=None):
+    """F\u00fchrt 4 Signal-Analysten parallel aus.
 
-    # Textfelder extrahieren
-    texts = {
-        "rating_reasoning": analysis.get("rating", {}).get("reasoning", ""),
-        "recommendation_detail": analysis.get("recommendation", {}).get("detail", ""),
-        "escalation_trigger": analysis.get("escalation_trigger", "") or "",
-        "signal_notes": {
-            name: sig.get("note", "")
-            for name, sig in analysis.get("signals", {}).items()
-        },
-        "sentiment_events": [
-            {"headline": e.get("headline", ""), "summary": e.get("summary", "")}
-            for e in analysis.get("sentiment_events", [])
-        ],
+    Args:
+        researches: Completed researches from DB. Each analyst receives only
+                    researches where its name is in ampel_targets.
+
+    Returns:
+        dict: { "trend": {...}, "volatility": {...}, "macro": {...}, "sentiment": {...} }
+        Werte k\u00f6nnen None sein bei Fehlern (Fallback auf mechanisches Signal).
+    """
+    tasks = {
+        "trend": (TREND_ANALYST_PROMPT, build_trend_analyst_prompt(market, mech_signals, researches)),
+        "volatility": (VOLATILITY_ANALYST_PROMPT, build_volatility_analyst_prompt(market, mech_signals, researches)),
+        "macro": (MACRO_ANALYST_PROMPT, build_macro_analyst_prompt(market, mech_signals, researches)),
+        "sentiment": (SENTIMENT_ANALYST_PROMPT, build_sentiment_analyst_prompt(market, mech_signals, news_results, researches)),
     }
 
-    thesis = analysis.get("thesis")
-    if thesis:
-        texts["thesis"] = {
-            "statement": thesis.get("statement", ""),
-            "catalyst": thesis.get("catalyst", ""),
-            "expected_if_positive": thesis.get("expected_if_positive", ""),
-            "expected_if_negative": thesis.get("expected_if_negative", ""),
+    results = {}
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(call_signal_analyst, name, sys_p, usr_p): name
+            for name, (sys_p, usr_p) in tasks.items()
         }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                results[name] = future.result()
+            except Exception as e:
+                log.error("Stage 1 %s Exception: %s", name, e)
+                results[name] = None
 
-    user_prompt = (
-        "Vereinfache diese Analyse-Texte für einen Börsen-Anfänger.\n"
-        "Gib die vereinfachten Texte als JSON mit exakt denselben Schlüsseln zurück.\n\n"
-        + json.dumps(texts, ensure_ascii=False, indent=2)
+    return results
+
+
+# ── Stage 2: Synthese ────────────────────────────────────────────────────
+
+def run_stage2(market, mech_signals, mech_score, stage1_results,
+               history, theses, researches, news_results, max_retries=1):
+    """F\u00fchrt die Synthese-Stufe aus.
+
+    Returns:
+        tuple: (result_dict, raw_llm_text)
+    """
+    user_prompt = build_synthesis_prompt(
+        market, mech_signals, mech_score, stage1_results,
+        history, theses, researches, news_results,
     )
 
-    try:
-        llm_text = call_llm(SIMPLIFY_SYSTEM_PROMPT, user_prompt)
-        return extract_json(llm_text)
-    except Exception as e:
-        log.warning("Vereinfachung fehlgeschlagen: %s", e)
-        return None
+    for attempt in range(max_retries + 1):
+        try:
+            llm_text = call_llm(SYNTHESIS_PROMPT, user_prompt)
+            result = extract_json(llm_text)
+            log.info("Stage 2 Synthese: overall=%s", result.get("rating", {}).get("overall"))
+            return result, llm_text
+        except Exception as e:
+            if attempt < max_retries:
+                log.warning("Stage 2 Synthese Versuch %d fehlgeschlagen: %s — Retry...",
+                            attempt + 1, e)
+                continue
+            raise
 
 
-# ── Hybrid-Merge ─────────────────────────────────────────────────────────
+# ── Hybrid-Merge (mehrstufig) ────────────────────────────────────────────
 
-def merge_analysis(date_str, market, mech_signals, mech_score, llm_data):
-    """Merged deterministische Daten mit LLM-Output zu vollständiger Analyse.
+def merge_multistage_analysis(date_str, market, mech_signals, mech_score,
+                               stage1_results, stage2_result):
+    """Merged Stage 1 + Stage 2 Ergebnisse in das finale Analyse-Schema.
 
-    Marktdaten und mechanische Signale kommen aus unserer Berechnung (vertrauenswürdig).
-    Context, Rating, Sentiment, Thesis kommen vom LLM.
+    Output-Schema ist identisch zum bisherigen merge_analysis() Output.
     """
     dt = datetime.strptime(date_str, "%Y-%m-%d")
     weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
-    # Signale: mechanical aus unserer Berechnung, context+note vom LLM
+    # Signale: mechanical aus unserer Berechnung, context+note von Stage 1
     signals = {}
     for name in ["trend", "volatility", "macro", "sentiment"]:
-        llm_sig = llm_data.get("signals", {}).get(name, {})
+        s1 = stage1_results.get(name) or {}
         signals[name] = {
-            "mechanical": mech_signals[name] if name != "sentiment" else llm_sig.get("mechanical", "green"),
-            "context": llm_sig.get("context", mech_signals.get(name, "green")),
-            "note": llm_sig.get("note", ""),
+            "mechanical": mech_signals[name] if name != "sentiment" else s1.get("mechanical", "green"),
+            "context": s1.get("context", mech_signals.get(name, "green")),
+            "note": s1.get("note", ""),
         }
 
-    # Rating: mechanical_score aus unserer Berechnung (Sentiment vom LLM einrechnen)
+    # Sentiment-Events von Stage 1
+    sentiment_s1 = stage1_results.get("sentiment") or {}
+    sentiment_events = sentiment_s1.get("events", [])
+
+    # Rating: mechanical_score aus unserer Berechnung
     sent_mech = signals["sentiment"]["mechanical"]
     actual_score = sum(1 for n in ["trend", "volatility", "macro"] if mech_signals[n] == "green")
     if sent_mech == "green":
         actual_score += 1
 
-    llm_rating = llm_data.get("rating", {})
+    s2 = stage2_result or {}
+    s2_rating = s2.get("rating", {})
 
     analysis = {
         "date": date_str,
@@ -389,15 +449,15 @@ def merge_analysis(date_str, market, mech_signals, mech_score, llm_data):
         "signals": signals,
         "rating": {
             "mechanical_score": actual_score,
-            "overall": llm_rating.get("overall", "YELLOW"),
-            "reasoning": llm_rating.get("reasoning", ""),
+            "overall": s2_rating.get("overall", "YELLOW").upper(),
+            "reasoning": s2_rating.get("reasoning", ""),
         },
-        "sentiment_events": llm_data.get("sentiment_events", []),
-        "recommendation": llm_data.get("recommendation", {"action": "hold", "detail": ""}),
-        "thesis": llm_data.get("thesis"),
-        "escalation_trigger": llm_data.get("escalation_trigger"),
-        "crash_rule_active": llm_data.get("crash_rule_active", False),
-        "market_context": llm_data.get("market_context"),
+        "sentiment_events": sentiment_events,
+        "recommendation": s2.get("recommendation", {"action": "hold", "detail": ""}),
+        "thesis": s2.get("thesis"),
+        "escalation_trigger": s2.get("escalation_trigger"),
+        "crash_rule_active": s2.get("crash_rule_active", False),
+        "market_context": s2.get("market_context"),
     }
 
     return analysis
@@ -406,26 +466,25 @@ def merge_analysis(date_str, market, mech_signals, mech_score, llm_data):
 # ── Orchestrator ─────────────────────────────────────────────────────────
 
 def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
-    """Führt die vollautomatische Ampel-Analyse durch.
+    """F\u00fchrt die vollautomatische Ampel-Analyse durch (mehrstufige Pipeline).
 
     Returns:
         dict: Die gespeicherte Analyse, oder None bei Fehler/Skip.
     """
     date_str = date_override or datetime.now().strftime("%Y-%m-%d")
 
-    # Bestehende Analyse für diesen Tag löschen (ermöglicht wiederholtes Testen)
+    # Bestehende Analyse f\u00fcr diesen Tag l\u00f6schen
     if not dry_run:
         existing = db.analyses.find_one({"date": date_str})
         if existing:
             db.analyses.delete_one({"date": date_str})
-            # Zugehörige These auch löschen
             db.theses.delete_many({"analysis_id": existing["_id"]})
-            log.info("Bestehende Analyse für %s gelöscht.", date_str)
-            print(f"Bestehende Analyse für {date_str} gelöscht — wird neu erstellt.")
+            log.info("Bestehende Analyse f\u00fcr %s gel\u00f6scht.", date_str)
+            print(f"Bestehende Analyse f\u00fcr {date_str} gel\u00f6scht \u2014 wird neu erstellt.")
 
     # 1. Marktdaten holen
-    log.info("=== Auto-Ampel Start für %s ===", date_str)
-    print(f"Hole Marktdaten für {date_str}...")
+    log.info("=== Auto-Ampel Start f\u00fcr %s ===", date_str)
+    print(f"Hole Marktdaten f\u00fcr {date_str}...")
 
     market = fetch_all_market_data(db, cpi_override=cpi_override)
 
@@ -435,7 +494,7 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
     # 3. News automatisch sammeln wenn aktive Topics existieren
     active_news = db.news_topics.count_documents({"active": True})
     if active_news > 0:
-        print(f"Sammle News für {active_news} aktive Topics...")
+        print(f"Sammle News f\u00fcr {active_news} aktive Topics...")
         try:
             from news import run_all_news_topics
             news_count = run_all_news_topics(db)
@@ -444,7 +503,7 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
         except Exception as e:
             log.warning("News-Sammlung fehlgeschlagen: %s", e)
 
-    # 4. Verlauf + Thesen + Researches + News aus DB laden
+    # 4. Kontext aus DB laden
     history = list(db.analyses.find(sort=[("date", -1)]).limit(5))
     theses = list(db.theses.find({"status": "open"}).sort("created_date", -1))
     researches = list(db.researches.find(
@@ -455,55 +514,57 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
         {"raw_headlines": 0},
     ))
 
-    # 5. Claude API aufrufen
-    print("Rufe LLM für Kontextanalyse auf...")
-    user_prompt = build_user_prompt(market, mech_signals, mech_score, history, theses, researches, news_results)
-    llm_text = call_llm(SYSTEM_PROMPT, user_prompt)
+    # 5. Stage 1: Signal-Analysten (4 parallel)
+    print("Stage 1: Bewerte Signale (4 Analysten parallel)...")
+    stage1_results = run_stage1(market, mech_signals, news_results, researches)
 
-    # 5. JSON parsen
+    for name in ["trend", "volatility", "macro", "sentiment"]:
+        r = stage1_results.get(name)
+        if r:
+            print(f"  {name.capitalize()}: {r.get('context', '?')}")
+        else:
+            print(f"  {name.capitalize()}: Fallback auf mechanisches Signal")
+
+    # 6. Stage 2: Synthese
+    print("Stage 2: Synthese...")
     try:
-        llm_data = extract_json(llm_text)
-    except (json.JSONDecodeError, ValueError) as e:
-        log.error("JSON-Parsing fehlgeschlagen: %s", e)
-        log.debug("LLM-Antwort: %s", llm_text[:500])
-
-        # Retry mit Fehlermeldung
-        print("JSON-Parsing fehlgeschlagen, versuche erneut...")
-        retry_prompt = (
-            f"{user_prompt}\n\n"
-            f"WICHTIG: Dein vorheriger Versuch war kein gültiges JSON. "
-            f"Fehler: {e}\n"
-            f"Antworte NUR mit dem JSON-Objekt. Kein Text, kein Markdown."
+        stage2_result, synthesis_text = run_stage2(
+            market, mech_signals, mech_score, stage1_results,
+            history, theses, researches, news_results,
         )
-        llm_text = call_llm(SYSTEM_PROMPT, retry_prompt)
-        try:
-            llm_data = extract_json(llm_text)
-        except (json.JSONDecodeError, ValueError) as e2:
-            log.error("Retry fehlgeschlagen: %s", e2)
-            print(f"Fehler: LLM-Antwort ist kein gültiges JSON. Abbruch.", file=sys.stderr)
-            return None
+    except Exception as e:
+        log.error("Synthese fehlgeschlagen: %s", e)
+        print(f"Fehler: Synthese fehlgeschlagen. Abbruch.", file=sys.stderr)
+        return None
 
-    # 6. Hybrid-Merge
-    analysis = merge_analysis(date_str, market, mech_signals, mech_score, llm_data)
+    # 7. Merge
+    analysis = merge_multistage_analysis(
+        date_str, market, mech_signals, mech_score, stage1_results, stage2_result,
+    )
 
-    # 7. Validieren
+    # 8. Validieren
     from argus import validate_analysis
     errors = validate_analysis(analysis)
     if errors:
         log.error("Validierungsfehler: %s", errors)
+        print("Validierungsfehler, wiederhole Synthese...")
 
-        # Retry mit Validierungsfehlern
-        print("Validierungsfehler, versuche erneut...")
-        retry_prompt = (
-            f"{user_prompt}\n\n"
-            f"WICHTIG: Die letzte Analyse hatte Validierungsfehler:\n"
-            + "\n".join(f"- {e}" for e in errors) +
-            "\nBitte korrigiere diese Fehler im JSON."
+        # Retry: nur Stage 2 wiederholen mit Fehler-Kontext
+        retry_user = build_synthesis_prompt(
+            market, mech_signals, mech_score, stage1_results,
+            history, theses, researches, news_results,
         )
-        llm_text = call_llm(SYSTEM_PROMPT, retry_prompt)
+        retry_user += (
+            "\n\nWICHTIG: Die letzte Analyse hatte Validierungsfehler:\n"
+            + "\n".join(f"- {e}" for e in errors)
+            + "\nBitte korrigiere diese Fehler im JSON."
+        )
         try:
-            llm_data = extract_json(llm_text)
-            analysis = merge_analysis(date_str, market, mech_signals, mech_score, llm_data)
+            llm_text = call_llm(SYNTHESIS_PROMPT, retry_user)
+            stage2_result = extract_json(llm_text)
+            analysis = merge_multistage_analysis(
+                date_str, market, mech_signals, mech_score, stage1_results, stage2_result,
+            )
             errors = validate_analysis(analysis)
             if errors:
                 log.error("Retry-Validierung fehlgeschlagen: %s", errors)
@@ -516,14 +577,12 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
             print(f"Fehler: Retry fehlgeschlagen. Abbruch.", file=sys.stderr)
             return None
 
-    # 8. Einsteiger-Modus: Textfelder vereinfachen
-    print("Erstelle Einsteiger-Version...")
-    simplified = simplify_analysis(analysis)
-    if simplified:
-        analysis["simplified"] = simplified
-        log.info("Einsteiger-Version erstellt.")
-    else:
-        log.warning("Einsteiger-Version konnte nicht erstellt werden — fahre ohne fort.")
+    # Rohe LLM-Outputs persistieren
+    analysis["llm_output"] = synthesis_text
+    analysis["stage1_outputs"] = {
+        name: json.dumps(r, ensure_ascii=False) if r else None
+        for name, r in stage1_results.items()
+    }
 
     # 9. Speichern oder Dry-Run
     if dry_run:
@@ -534,14 +593,14 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
     from argus import save_analysis
     save_analysis(db, analysis)
 
-    log.info("=== Auto-Ampel abgeschlossen: %s → %s ===", date_str, analysis["rating"]["overall"])
+    log.info("=== Auto-Ampel abgeschlossen: %s \u2192 %s ===", date_str, analysis["rating"]["overall"])
     return analysis
 
 
 # ── Logging Setup ────────────────────────────────────────────────────────
 
 def setup_logging():
-    """Konfiguriert Logging für den Auto-Ampel-Lauf."""
+    """Konfiguriert Logging f\u00fcr den Auto-Ampel-Lauf."""
     log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "ampel_auto.log")
@@ -553,7 +612,6 @@ def setup_logging():
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
 
-    # Auch auf stdout loggen
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
     root_logger.addHandler(console)

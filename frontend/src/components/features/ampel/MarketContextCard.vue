@@ -58,6 +58,7 @@ const NOTE_CONFIG: Record<string, { label: string; icon: string }> = {
   seasonality_note: { label: 'Saisonalität', icon: 'pi pi-calendar' },
   currency_note: { label: 'EUR/USD Wechselkurs', icon: 'pi pi-dollar' },
   credit_spread_note: { label: 'Credit Spread (HY)', icon: 'pi pi-chart-line' },
+  earnings_note: { label: 'Unternehmensgewinne', icon: 'pi pi-dollar' },
 }
 
 function keyToLabel(key: string): string {
