@@ -48,7 +48,7 @@
         <div v-if="runError" class="status-msg error">
           <i class="pi pi-exclamation-triangle" /> {{ runError }}
         </div>
-        <pre v-if="llmOutput" ref="llmOutputEl" class="llm-output">{{ llmOutput }}</pre>
+        <pre v-if="llmOutput" ref="llmOutputEl" class="llm-output">{{ cleanLlmOutput }}</pre>
       </div>
     </div>
 
@@ -340,6 +340,10 @@ const llmOutput = ref('')
 const runResult = ref<RunResult | null>(null)
 const runError = ref('')
 const llmOutputEl = ref<HTMLPreElement | null>(null)
+
+const cleanLlmOutput = computed(() =>
+  llmOutput.value.replace(/^```(?:json)?\s*\n?/gm, '').replace(/\n?\s*```\s*$/gm, ''),
+)
 
 // ── Computed ──
 const stageLabels: Record<string, string> = {

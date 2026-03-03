@@ -74,6 +74,17 @@
               </span>
             </div>
 
+            <div v-if="thesis.probability_positive_pct != null" class="probability-bar">
+              <div class="prob-header">
+                <span class="prob-label">Wahrscheinlichkeit positiv</span>
+                <span class="prob-value" :class="probClass(thesis.probability_positive_pct)">{{ thesis.probability_positive_pct }}%</span>
+              </div>
+              <div class="prob-track">
+                <div class="prob-fill" :class="probClass(thesis.probability_positive_pct)" :style="{ width: thesis.probability_positive_pct + '%' }" />
+              </div>
+              <p v-if="thesis.probability_reasoning" class="prob-reasoning">{{ thesis.probability_reasoning }}</p>
+            </div>
+
             <div class="scenarios">
               <div v-if="thesis.expected_if_positive" class="scenario scenario-positive">
                 <span class="scenario-icon">+</span>
@@ -236,6 +247,12 @@ const daysUntil = (dateStr: string): number => {
   now.setHours(0, 0, 0, 0)
   const target = new Date(dateStr)
   return Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+const probClass = (pct: number): string => {
+  if (pct >= 60) return 'prob-positive'
+  if (pct >= 40) return 'prob-neutral'
+  return 'prob-negative'
 }
 
 const loadData = () => {
@@ -490,6 +507,59 @@ onMounted(() => {
   &.countdown-past {
     color: #ef4444;
     :root.dark & { color: #fca5a5; }
+  }
+}
+
+// Probability Bar
+.probability-bar {
+  margin-bottom: 0.75rem;
+
+  .prob-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.375rem;
+  }
+
+  .prob-label {
+    font-size: 0.75rem;
+    color: var(--p-text-color-secondary);
+    font-weight: 500;
+  }
+
+  .prob-value {
+    font-size: 0.875rem;
+    font-weight: 700;
+
+    &.prob-positive { color: #10b981; }
+    &.prob-neutral { color: #f59e0b; }
+    &.prob-negative { color: #ef4444; }
+  }
+
+  .prob-track {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--p-surface-200);
+    overflow: hidden;
+
+    :root.dark & { background: var(--p-surface-700); }
+  }
+
+  .prob-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+
+    &.prob-positive { background: #10b981; }
+    &.prob-neutral { background: #f59e0b; }
+    &.prob-negative { background: #ef4444; }
+  }
+
+  .prob-reasoning {
+    font-size: 0.75rem;
+    color: var(--p-text-color-secondary);
+    margin: 0.375rem 0 0 0;
+    font-style: italic;
   }
 }
 

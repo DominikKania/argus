@@ -94,6 +94,32 @@ def ensure_indexes(db):
         upsert=True,
     )
 
+    # Portfolio-Config (Default: IWDA)
+    db.portfolio.update_one(
+        {"_id": "default"},
+        {"$setOnInsert": {
+            "_id": "default",
+            "primary_ticker": "IWDA.AS",
+            "name": "iShares Core MSCI World UCITS ETF",
+            "isin": "IE00B4L5Y983",
+            "currency": "EUR",
+            "allocation_eur": 6700,
+            "top_holdings": [
+                {"ticker": "AAPL", "name": "Apple", "sector": "Tech", "weight_pct": 5.0},
+                {"ticker": "MSFT", "name": "Microsoft", "sector": "Tech", "weight_pct": 4.5},
+                {"ticker": "NVDA", "name": "NVIDIA", "sector": "Tech", "weight_pct": 4.0},
+                {"ticker": "AMZN", "name": "Amazon", "sector": "Tech", "weight_pct": 3.5},
+                {"ticker": "GOOG", "name": "Alphabet", "sector": "Tech", "weight_pct": 2.5},
+                {"ticker": "META", "name": "Meta", "sector": "Tech", "weight_pct": 2.0},
+                {"ticker": "TSLA", "name": "Tesla", "sector": "Tech", "weight_pct": 1.5},
+                {"ticker": "JPM", "name": "JPMorgan", "sector": "Financials", "weight_pct": 1.2},
+                {"ticker": "V", "name": "Visa", "sector": "Financials", "weight_pct": 1.0},
+                {"ticker": "UNH", "name": "UnitedHealth", "sector": "Healthcare", "weight_pct": 1.0},
+            ],
+        }},
+        upsert=True,
+    )
+
 
 # ── Validierung ─────────────────────────────────────────────────────────────
 
@@ -205,6 +231,28 @@ def save_analysis(db, data):
         if update_result.modified_count:
             print(f"These aufgelöst: {tid[:12]}... — {resolution_text[:60]}")
 
+    # Wahrscheinlichkeits-Updates auf bestehende Thesen anwenden
+    prob_updates = data.pop("thesis_probability_updates", None) or []
+    for pu in prob_updates:
+        tid = pu.get("id", "")
+        prob = pu.get("probability_positive_pct")
+        reasoning = pu.get("probability_reasoning", "")
+        if not tid or prob is None:
+            continue
+        try:
+            oid = ObjectId(tid)
+        except Exception:
+            continue
+        update_result = db.theses.update_one(
+            {"_id": oid, "status": "open"},
+            {"$set": {
+                "probability_positive_pct": prob,
+                "probability_reasoning": reasoning,
+            }},
+        )
+        if update_result.modified_count:
+            print(f"These Wahrscheinlichkeit: {tid[:12]}... → {prob}% positiv")
+
     result = db.analyses.insert_one(data)
     analysis_id = result.inserted_id
     print(f"Analyse gespeichert: {data['date']} | {OVERALL_DISPLAY.get(data['rating']['overall'], data['rating']['overall'])}")
@@ -220,6 +268,8 @@ def save_analysis(db, data):
             "catalyst_date": thesis_data.get("catalyst_date"),
             "expected_if_positive": thesis_data.get("expected_if_positive"),
             "expected_if_negative": thesis_data.get("expected_if_negative"),
+            "probability_positive_pct": thesis_data.get("probability_positive_pct"),
+            "probability_reasoning": thesis_data.get("probability_reasoning"),
             "status": "open",
             "resolution": None,
             "resolution_date": None,

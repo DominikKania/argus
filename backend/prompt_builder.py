@@ -199,6 +199,22 @@ def build_market_context(market: dict) -> list[str]:
         lines.append(f"- LQD (Inv. Grade): {cs['lqd_price']}$ ({cs['lqd_perf_1m']:+.2f}%)")
         lines.append(f"- Spread-Proxy (HYG-LQD Perf.): {cs['spread_proxy']:+.2f}pp ({cs['direction']})")
 
+    # Top Holdings
+    th = market.get("top_holdings")
+    if th and th.get("holdings"):
+        lines.append("")
+        lines.append(f"## TOP-HOLDINGS ({th['above_sma50_count']}/{th['total_count']} über SMA50)")
+        for h in th["holdings"]:
+            sma_status = ""
+            if h.get("above_sma50") is True:
+                sma_status = " ✓ >SMA50"
+            elif h.get("above_sma50") is False:
+                sma_status = " ✗ <SMA50"
+            lines.append(
+                f"- {h['name']} ({h['ticker']}, {h['sector']}, {h['weight_pct']}%): "
+                f"${h['price']} | 1M: {h['perf_1m_pct']:+.1f}%{sma_status}"
+            )
+
     return lines
 
 
@@ -349,6 +365,12 @@ def build_theses_context(theses: list) -> list[str]:
             lines.append(f"Wenn positiv: {t['expected_if_positive']}")
         if t.get("expected_if_negative"):
             lines.append(f"Wenn negativ: {t['expected_if_negative']}")
+        prob = t.get("probability_positive_pct")
+        if prob is not None:
+            lines.append(f"Aktuelle Wahrscheinlichkeit positiv: {prob}%")
+            reasoning = t.get("probability_reasoning", "")
+            if reasoning:
+                lines.append(f"Begründung: {reasoning}")
 
     return lines
 

@@ -216,6 +216,8 @@ export interface OpenThesis {
   catalyst_date?: string
   expected_if_positive?: string
   expected_if_negative?: string
+  probability_positive_pct?: number | null
+  probability_reasoning?: string | null
   status: 'open' | 'resolved'
   resolution?: string
   resolution_date?: string

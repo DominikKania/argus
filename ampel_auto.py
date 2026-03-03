@@ -265,8 +265,13 @@ Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
     "catalyst": "Was genau muss passieren?",
     "catalyst_date": "YYYY-MM-DD (max 4-6 Wochen in der Zukunft!)",
     "expected_if_positive": "Was passiert f\u00fcr mein ETF wenn die These eintritt?",
-    "expected_if_negative": "Was passiert f\u00fcr mein ETF wenn die These nicht eintritt?"
+    "expected_if_negative": "Was passiert f\u00fcr mein ETF wenn die These nicht eintritt?",
+    "probability_positive_pct": 60,
+    "probability_reasoning": "1-2 S\u00e4tze: Warum diese Wahrscheinlichkeit? Welche Basisrate/Evidenz?"
   },
+  "thesis_probability_updates": [
+    {"id": "these-id-aus-kontext", "probability_positive_pct": 55, "probability_reasoning": "Kurze Begr\u00fcndung basierend auf neuen Daten"}
+  ],
   "escalation_trigger": "...",
   "crash_rule_active": false,
   "market_context": {
@@ -287,8 +292,10 @@ REGELN:
 - thesis darf null sein wenn keine neue These sinnvoll ist
 - thesis: MAXIMALER Zeithorizont 4-6 Wochen! catalyst_date muss 2-6 Wochen in der Zukunft liegen.
 - thesis: Statement, Katalysator und Szenarien m\u00fcssen ohne Vorwissen verst\u00e4ndlich sein
-- thesis: Pr\u00fcfe die OFFENEN THESEN im Kontext. Erstelle NUR eine neue These wenn sie ein ANDERES Thema oder einen wesentlich anderen Blickwinkel abdeckt. Wenn eine bestehende These das gleiche Thema bereits behandelt \u2192 thesis: null. Lieber keine These als ein Duplikat!
+- thesis: Pr\u00fcfe die OFFENEN THESEN im Kontext. Erstelle NUR eine neue These wenn sie ein KOMPLETT NEUES Thema abdeckt das in KEINER bestehenden These vorkommt. Auch Kombinationen oder Zusammenfassungen bestehender Thesen sind DUPLIKATE! Wenn Nahost UND Z\u00f6lle schon als separate Thesen existieren, ist "Nahost und Z\u00f6lle entscheiden..." ein Duplikat. thesis: null ist der NORMALFALL wenn bereits offene Thesen existieren.
 - thesis_resolutions: NUR auflösen wenn die These EINDEUTIG eingetreten oder widerlegt ist! Eine These die "noch läuft", "weiter gilt" oder "noch nicht entschieden" ist, wird NICHT aufgelöst. Konkreter Test: Kannst du klar sagen "Die These ist eingetreten weil X" oder "Die These ist widerlegt weil Y"? Wenn nein → NICHT auflösen. Leeres Array [] ist der Normalfall. Im Zweifel: nicht auflösen.
+- thesis_probability_updates: Aktualisiere die Wahrscheinlichkeit JEDER offenen These basierend auf den aktuellen Marktdaten und Research-Erkenntnissen. Nutze historische Basisraten aus dem Research-Kontext wenn vorhanden. probability_positive_pct = Wahrscheinlichkeit dass das POSITIVE Szenario eintritt (0-100). Leeres Array [] nur wenn keine offenen Thesen existieren.
+- probability_positive_pct bei neuen Thesen: IMMER setzen, basierend auf Evidenz. Nicht raten — nutze Basisraten aus Research, Marktdaten, historische Muster.
 - key_levels, risk_assessment, action_triggers: IMMER ausf\u00fcllen, nie null
 - historical_comparison: Nenne immer eine konkrete Vergleichsphase (Monat/Jahr)
 - market_context: Jedes Feld 2-3 S\u00e4tze, nur leer lassen wenn wirklich nicht relevant
@@ -487,6 +494,7 @@ def merge_multistage_analysis(date_str, market, mech_signals, mech_score,
         "sentiment_events": sentiment_events,
         "recommendation": s2.get("recommendation", {"action": "hold", "detail": ""}),
         "thesis_resolutions": s2.get("thesis_resolutions", []),
+        "thesis_probability_updates": s2.get("thesis_probability_updates", []),
         "thesis": s2.get("thesis"),
         "escalation_trigger": s2.get("escalation_trigger"),
         "crash_rule_active": s2.get("crash_rule_active", False),

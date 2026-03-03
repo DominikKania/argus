@@ -853,6 +853,59 @@ def fetch_earnings_aggregate():
         return None
 
 
+def fetch_top_holdings_data(db):
+    """Fetch current price data for portfolio top holdings from DB config."""
+    portfolio = db.portfolio.find_one({"_id": "default"})
+    if not portfolio or not portfolio.get("top_holdings"):
+        return None
+
+    holdings = portfolio["top_holdings"]
+    tickers = [h["ticker"] for h in holdings]
+
+    results = []
+    for h in holdings:
+        ticker = h["ticker"]
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(period="3mo")
+            if hist.empty:
+                continue
+
+            close_series = hist["Close"]
+            current = float(close_series.iloc[-1])
+            sma50_val = float(close_series.rolling(50).mean().iloc[-1]) if len(close_series) >= 50 else None
+
+            # 1-month performance
+            one_month_ago = len(close_series) - 22 if len(close_series) >= 22 else 0
+            perf_1m = ((current / float(close_series.iloc[one_month_ago])) - 1) * 100
+
+            results.append({
+                "ticker": ticker,
+                "name": h.get("name", ticker),
+                "sector": h.get("sector", ""),
+                "weight_pct": h.get("weight_pct", 0),
+                "price": round(current, 2),
+                "sma50": round(sma50_val, 2) if sma50_val and sma50_val == sma50_val else None,
+                "above_sma50": current > sma50_val if sma50_val and sma50_val == sma50_val else None,
+                "perf_1m_pct": round(perf_1m, 2),
+            })
+        except Exception as e:
+            log.warning("Top-Holding %s fehlgeschlagen: %s", ticker, e)
+
+    if not results:
+        return None
+
+    above_count = sum(1 for r in results if r.get("above_sma50") is True)
+    total = sum(1 for r in results if r.get("above_sma50") is not None)
+
+    return {
+        "holdings": results,
+        "above_sma50_count": above_count,
+        "total_count": total,
+        "above_sma50_pct": round(above_count / total * 100) if total else 0,
+    }
+
+
 def fetch_all_market_data(db, cpi_override=None):
     """Holt alle Marktdaten und gibt das vollständige market-Dict zurück."""
     # Core-Daten (sequentiell — kritisch)
@@ -874,6 +927,7 @@ def fetch_all_market_data(db, cpi_override=None):
             executor.submit(fetch_gold): "gold",
             executor.submit(fetch_dxy): "dxy",
             executor.submit(fetch_earnings_aggregate): "earnings",
+            executor.submit(fetch_top_holdings_data, db): "top_holdings",
         }
         for future in as_completed(futures):
             key = futures[future]
