@@ -87,6 +87,12 @@ export interface ThesisReviewContext {
   thesis: Record<string, unknown>
 }
 
+export interface LessonContext {
+  thesisId: string
+  statement: string
+  resolution: string
+}
+
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
   const isOpen = ref(false)
@@ -98,6 +104,7 @@ export const useChatStore = defineStore('chat', () => {
   const refinedPrompt = ref<string | null>(null)
   const thesisReviewContext = ref<ThesisReviewContext | null>(null)
   const refinedThesis = ref<Record<string, unknown> | null>(null)
+  const lessonContext = ref<LessonContext | null>(null)
 
   function setView(view: string) {
     currentView.value = view
@@ -124,6 +131,7 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null
     promptReviewContext.value = null
     thesisReviewContext.value = null
+    lessonContext.value = null
     isOpen.value = true
     sendMessage(topic)
   }
@@ -134,6 +142,21 @@ export const useChatStore = defineStore('chat', () => {
     promptReviewContext.value = ctx
     thesisReviewContext.value = null
     isOpen.value = true
+  }
+
+  function openForLesson(ctx: LessonContext) {
+    messages.value = []
+    error.value = null
+    promptReviewContext.value = null
+    thesisReviewContext.value = null
+    lessonContext.value = ctx
+    isOpen.value = true
+    sendMessage(
+      `Lass uns über diese aufgelöste These sprechen und daraus lernen:\n\n` +
+      `These: ${ctx.statement}\n` +
+      `Auflösung: ${ctx.resolution}\n\n` +
+      `Was können wir daraus lernen? War die These gut formuliert? Was sollten wir bei zukünftigen Analysen anders machen?`
+    )
   }
 
   function openForThesisReview(ctx: ThesisReviewContext) {
@@ -246,6 +269,7 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null
     promptReviewContext.value = null
     thesisReviewContext.value = null
+    lessonContext.value = null
   }
 
   return {
@@ -259,6 +283,7 @@ export const useChatStore = defineStore('chat', () => {
     refinedPrompt,
     thesisReviewContext,
     refinedThesis,
+    lessonContext,
     setView,
     setTicker,
     toggleChat,
@@ -267,6 +292,7 @@ export const useChatStore = defineStore('chat', () => {
     openWithContext,
     openForPromptReview,
     openForThesisReview,
+    openForLesson,
     sendMessage,
     clearHistory,
   }

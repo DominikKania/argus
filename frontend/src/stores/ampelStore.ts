@@ -8,6 +8,7 @@ export const useAmpelStore = defineStore('ampel', () => {
   const latestAnalysis = ref<Analysis | null>(null)
   const history = ref<Analysis[]>([])
   const theses = ref<OpenThesis[]>([])
+  const resolvedTheses = ref<OpenThesis[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -71,6 +72,14 @@ export const useAmpelStore = defineStore('ampel', () => {
     theses.value = await ApiService.get<OpenThesis[]>(API_ENDPOINTS.AMPEL.THESES)
   }
 
+  async function fetchResolvedTheses() {
+    try {
+      resolvedTheses.value = await ApiService.get<OpenThesis[]>(API_ENDPOINTS.AMPEL.THESES_RESOLVED)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
   async function updateThesis(id: string, data: Partial<OpenThesis>): Promise<OpenThesis | null> {
     try {
       const updated = await ApiService.put<OpenThesis>(API_ENDPOINTS.AMPEL.UPDATE_THESIS(id), data)
@@ -103,11 +112,13 @@ export const useAmpelStore = defineStore('ampel', () => {
     latestAnalysis,
     history,
     theses,
+    resolvedTheses,
     loading,
     error,
     fetchLatest,
     fetchHistory,
     fetchTheses,
+    fetchResolvedTheses,
     fetchDashboard,
     updateThesis,
     refineThesis,

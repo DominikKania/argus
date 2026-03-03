@@ -176,15 +176,40 @@ def validate_analysis(data):
 # ── Befehle ─────────────────────────────────────────────────────────────────
 
 def save_analysis(db, data):
-    """Speichert eine validierte Analyse in MongoDB und erstellt ggf. eine These.
+    """Speichert eine validierte Analyse in MongoDB, löst Thesen auf und erstellt ggf. neue.
 
     Wird von cmd_save() und ampel_auto.run_auto_ampel() genutzt.
     """
+    from bson import ObjectId
+
+    # Thesen-Auflösungen verarbeiten (VOR dem Speichern, da wir das Feld danach entfernen)
+    resolutions = data.pop("thesis_resolutions", None) or []
+    for res in resolutions:
+        tid = res.get("id", "")
+        resolution_text = res.get("resolution", "")
+        if not tid or not resolution_text:
+            continue
+        try:
+            oid = ObjectId(tid)
+        except Exception:
+            print(f"Ungültige These-ID übersprungen: {tid}")
+            continue
+        update_result = db.theses.update_one(
+            {"_id": oid, "status": "open"},
+            {"$set": {
+                "status": "resolved",
+                "resolution": resolution_text,
+                "resolution_date": data["date"],
+            }},
+        )
+        if update_result.modified_count:
+            print(f"These aufgelöst: {tid[:12]}... — {resolution_text[:60]}")
+
     result = db.analyses.insert_one(data)
     analysis_id = result.inserted_id
     print(f"Analyse gespeichert: {data['date']} | {OVERALL_DISPLAY.get(data['rating']['overall'], data['rating']['overall'])}")
 
-    # These automatisch anlegen wenn vorhanden
+    # Neue These automatisch anlegen wenn vorhanden
     thesis_data = data.get("thesis")
     if thesis_data and thesis_data.get("statement"):
         thesis_doc = {

@@ -43,11 +43,6 @@ def sync_prices():
             )
             latest_date = latest_doc["date"] if latest_doc else None
 
-            # Skip if already up to date
-            if latest_date and latest_date >= today:
-                results.append({"ticker": ticker, "new_records": 0, "status": "up_to_date"})
-                continue
-
             # Fetch 2y history for SMA calculation
             t = yf.Ticker(ticker)
             hist = t.history(period="2y")
@@ -60,10 +55,11 @@ def sync_prices():
             sma200_series = close.rolling(200).mean()
 
             # Only store days after the latest date in DB
+            # Always re-fetch the latest day to get updated close price
             count = 0
             for idx in hist.index:
                 date_str = idx.strftime("%Y-%m-%d")
-                if latest_date and date_str <= latest_date:
+                if latest_date and date_str < latest_date:
                     continue
 
                 row = hist.loc[idx]

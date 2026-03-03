@@ -164,6 +164,21 @@ def _build_extra_context(db, view: str, ticker: Optional[str]) -> str:
                 for label, note in notes:
                     parts.append(f"- **{label}:** {note}")
 
+        # ── Analyse-Ergebnisse (Signale, Rating, Empfehlung) ──────────
+        sig = analysis.get("signals", {})
+        rat = analysis.get("rating", {})
+        rec = analysis.get("recommendation", {})
+        parts.append(f"\n## AKTUELLE ANALYSE ({analysis.get('date', '?')})")
+        parts.append(f"Rating: {rat.get('overall', '?')} (Score {rat.get('mechanical_score', '?')}/4)")
+        parts.append(f"Begründung: {rat.get('reasoning', '?')}")
+        parts.append(f"Empfehlung: {rec.get('action', '?')} — {rec.get('detail', '?')}")
+        for name in ["trend", "volatility", "macro", "sentiment"]:
+            s = sig.get(name, {})
+            parts.append(f"- {name}: mechanical={s.get('mechanical')}, context={s.get('context')}")
+            parts.append(f"  {s.get('note', '')}")
+        if analysis.get("escalation_trigger"):
+            parts.append(f"Escalation Trigger: {analysis['escalation_trigger']}")
+
     return "\n".join(parts)
 
 

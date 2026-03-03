@@ -59,6 +59,26 @@
         />
       </div>
 
+      <!-- Lesson Banner -->
+      <div v-if="chatStore.lessonContext" class="review-banner review-banner-lesson">
+        <div class="banner-header">
+          <i class="pi pi-lightbulb" />
+          <span>Lernen aus These</span>
+        </div>
+        <p class="banner-topic">{{ chatStore.lessonContext.statement }}</p>
+        <Button
+          v-if="chatStore.messages.length >= 2"
+          :label="lessonSaved ? 'Regeln gespeichert' : 'Regeln extrahieren'"
+          :icon="lessonSaved ? 'pi pi-check' : 'pi pi-lightbulb'"
+          size="small"
+          class="refine-btn"
+          :severity="lessonSaved ? 'success' : 'primary'"
+          :disabled="lessonSaved || savingLesson"
+          :loading="savingLesson"
+          @click="saveLesson"
+        />
+      </div>
+
       <!-- Welcome -->
       <div v-if="!chatStore.messages.length && !chatStore.isLoading" class="welcome">
         <div class="welcome-icon">
@@ -142,6 +162,8 @@ import { useChatStore } from '@/stores/chatStore'
 import { useAmpelStore } from '@/stores/ampelStore'
 import { usePricesStore } from '@/stores/pricesStore'
 import { useResearchStore } from '@/stores/researchStore'
+import { ApiService } from '@/services/apiService'
+import { API_ENDPOINTS } from '@/config/apiEndpoints'
 
 const chatStore = useChatStore()
 const ampelStore = useAmpelStore()
@@ -157,6 +179,8 @@ const lastMessage = computed(() =>
 )
 const refining = ref(false)
 const refiningThesis = ref(false)
+const savingLesson = ref(false)
+const lessonSaved = ref(false)
 
 async function refineThesis() {
   const ctx = chatStore.thesisReviewContext
@@ -173,6 +197,32 @@ async function refineThesis() {
       role: 'assistant',
       content: 'These wurde aktualisiert und übernommen.',
     })
+  }
+}
+
+async function saveLesson() {
+  const ctx = chatStore.lessonContext
+  if (!ctx || chatStore.messages.length < 2) return
+
+  savingLesson.value = true
+  try {
+    // Send full conversation to LLM for lesson extraction
+    const messages = chatStore.messages.map(m => ({ role: m.role, content: m.content }))
+    const res = await ApiService.post<{ lessons_learned?: string }>(
+      API_ENDPOINTS.AMPEL.EXTRACT_LESSONS(ctx.thesisId),
+      { messages },
+    )
+    if (res?.lessons_learned) {
+      lessonSaved.value = true
+      chatStore.messages.push({
+        role: 'assistant',
+        content: `Regeln aus dem Gespräch extrahiert und gespeichert:\n\n${res.lessons_learned}`,
+      })
+    }
+  } catch (err) {
+    console.error(err)
+  } finally {
+    savingLesson.value = false
   }
 }
 
@@ -463,6 +513,13 @@ watch(() => chatStore.isOpen, (open) => {
     border-color: rgba(245, 158, 11, 0.2);
 
     .banner-header { color: #f59e0b; }
+  }
+
+  &.review-banner-lesson {
+    background: rgba(16, 185, 129, 0.08);
+    border-color: rgba(16, 185, 129, 0.2);
+
+    .banner-header { color: #059669; :root.dark & { color: #6ee7b7; } }
   }
 }
 

@@ -189,17 +189,20 @@ Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
 
 SYNTHESIS_PROMPT = """\
 Du bist der Chef-Analyst des Argus Investment-Systems. Du erh\u00e4ltst die Bewertungen \
-von 4 spezialisierten Signal-Analysten und erstellst die Gesamtbewertung.
+von 4 spezialisierten Signal-Analysten und erstellst eine umfassende Gesamtbewertung.
 
 ## PORTFOLIO
 iShares Core MSCI World UCITS ETF USD (Acc) — ~6.700\u20ac, 100% Allokation
 
 ## DEINE AUFGABE
 1. Erstelle das Overall Rating basierend auf den 4 Signal-Bewertungen
-2. Formuliere eine Empfehlung
-3. Erstelle optional eine These (max. 4-6 Wochen Zeithorizont!)
-4. Setze Eskalations-Trigger und Crash-Regel
-5. Erg\u00e4nze Markt-Kontext-Notizen
+2. Formuliere eine ausf\u00fchrliche Empfehlung mit konkreten n\u00e4chsten Schritten
+3. Bestimme Schl\u00fcsselmarken (Unterst\u00fctzung/Widerstand) und Risikoeinsch\u00e4tzung
+4. Definiere konkrete Kauf-/Verkaufs-Trigger und Beobachtungspunkte
+5. Vergleiche mit \u00e4hnlichen historischen Marktphasen
+6. Erstelle optional eine These (max. 4-6 Wochen Zeithorizont!)
+7. Setze Eskalations-Trigger und Crash-Regel
+8. Erg\u00e4nze Markt-Kontext-Notizen
 
 ## OVERALL RATING
 - GREEN: 4/4 oder 3/4 mit stabilem Kontext
@@ -221,17 +224,42 @@ Bewerte folgende Punkte f\u00fcr die market_context Notizen:
 Alle Texte in einfachem Deutsch. KEINE Fachk\u00fcrzel, Paragraphen-Nummern oder \
 Gesetzesbezeichnungen. Stattdessen in einfachen Worten erkl\u00e4ren.
 
+## TEXTTIEFE
+- reasoning: 3-5 S\u00e4tze, erkl\u00e4re das Zusammenspiel der Signale
+- recommendation.detail: 3-5 S\u00e4tze, konkret und handlungsorientiert
+- market_context Notizen: 2-3 S\u00e4tze pro Feld, nicht nur Stichworte
+- historical_comparison: Nenne eine konkrete Vergleichsphase mit Datum und was damals passierte
+
 ## AUSGABE
 Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
 {
   "rating": {
     "overall": "GREEN|GREEN_FRAGILE|YELLOW|YELLOW_BEARISH|RED|RED_CAPITULATION",
-    "reasoning": "..."
+    "reasoning": "3-5 S\u00e4tze: Zusammenspiel der Signale, warum dieses Rating"
   },
   "recommendation": {
     "action": "hold|buy|partial_sell|hedge|wait",
-    "detail": "..."
+    "detail": "3-5 S\u00e4tze: Was genau tun, worauf achten, wann handeln"
   },
+  "key_levels": {
+    "support": "Wichtigste Unterst\u00fctzung mit Kurs und Begr\u00fcndung (z.B. SMA50 bei 112.65\u20ac)",
+    "resistance": "Wichtigster Widerstand mit Kurs und Begr\u00fcndung",
+    "pivot_note": "Was passiert bei Bruch der Unterst\u00fctzung oder des Widerstands?"
+  },
+  "risk_assessment": {
+    "level": "low|moderate|elevated|high|extreme",
+    "primary_risks": ["Risiko 1", "Risiko 2", "Risiko 3"],
+    "mitigating_factors": ["Positiver Faktor 1", "Positiver Faktor 2"]
+  },
+  "action_triggers": {
+    "buy_trigger": "Bei welchem Kurs/Bedingung nachkaufen?",
+    "sell_trigger": "Bei welchem Kurs/Bedingung reduzieren?",
+    "watch_items": ["Was in den n\u00e4chsten 1-2 Wochen beobachten?", "..."]
+  },
+  "historical_comparison": "2-3 S\u00e4tze: Vergleich mit \u00e4hnlicher Marktphase, was damals passierte, was wir daraus lernen",
+  "thesis_resolutions": [
+    {"id": "these-id-aus-kontext", "resolution": "EINDEUTIG eingetreten/widerlegt: Was genau ist passiert?"}
+  ],
   "thesis": {
     "statement": "Klarer Satz ohne Fachk\u00fcrzel",
     "catalyst": "Was genau muss passieren?",
@@ -242,24 +270,28 @@ Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
   "escalation_trigger": "...",
   "crash_rule_active": false,
   "market_context": {
-    "sector_rotation_note": "...",
-    "regional_note": "...",
-    "seasonality_note": "...",
-    "breadth_note": "...",
-    "put_call_note": "...",
-    "currency_note": "...",
-    "credit_spread_note": "...",
-    "earnings_note": "..."
+    "sector_rotation_note": "2-3 S\u00e4tze...",
+    "regional_note": "2-3 S\u00e4tze...",
+    "seasonality_note": "2-3 S\u00e4tze...",
+    "breadth_note": "2-3 S\u00e4tze...",
+    "put_call_note": "2-3 S\u00e4tze...",
+    "currency_note": "2-3 S\u00e4tze...",
+    "credit_spread_note": "2-3 S\u00e4tze...",
+    "earnings_note": "2-3 S\u00e4tze..."
   }
 }
 
 REGELN:
-- Alle Texte auf Deutsch, kurz und pr\u00e4gnant
-- Enum-Werte exakt wie angegeben (lowercase f\u00fcr action, UPPERCASE f\u00fcr overall)
+- Alle Texte auf Deutsch, verst\u00e4ndlich und ausf\u00fchrlich (nicht nur Stichworte!)
+- Enum-Werte exakt wie angegeben (lowercase f\u00fcr action/level, UPPERCASE f\u00fcr overall)
 - thesis darf null sein wenn keine neue These sinnvoll ist
 - thesis: MAXIMALER Zeithorizont 4-6 Wochen! catalyst_date muss 2-6 Wochen in der Zukunft liegen.
 - thesis: Statement, Katalysator und Szenarien m\u00fcssen ohne Vorwissen verst\u00e4ndlich sein
-- market_context: Kurze Notizen, nur ausf\u00fcllen wenn relevant
+- thesis: Pr\u00fcfe die OFFENEN THESEN im Kontext. Erstelle NUR eine neue These wenn sie ein ANDERES Thema oder einen wesentlich anderen Blickwinkel abdeckt. Wenn eine bestehende These das gleiche Thema bereits behandelt \u2192 thesis: null. Lieber keine These als ein Duplikat!
+- thesis_resolutions: NUR auflösen wenn die These EINDEUTIG eingetreten oder widerlegt ist! Eine These die "noch läuft", "weiter gilt" oder "noch nicht entschieden" ist, wird NICHT aufgelöst. Konkreter Test: Kannst du klar sagen "Die These ist eingetreten weil X" oder "Die These ist widerlegt weil Y"? Wenn nein → NICHT auflösen. Leeres Array [] ist der Normalfall. Im Zweifel: nicht auflösen.
+- key_levels, risk_assessment, action_triggers: IMMER ausf\u00fcllen, nie null
+- historical_comparison: Nenne immer eine konkrete Vergleichsphase (Monat/Jahr)
+- market_context: Jedes Feld 2-3 S\u00e4tze, nur leer lassen wenn wirklich nicht relevant
 """
 
 
@@ -383,7 +415,7 @@ def run_stage1(market, mech_signals, news_results, researches=None):
 # ── Stage 2: Synthese ────────────────────────────────────────────────────
 
 def run_stage2(market, mech_signals, mech_score, stage1_results,
-               history, theses, researches, news_results, max_retries=1):
+               history, theses, researches, news_results, lessons=None, max_retries=1):
     """F\u00fchrt die Synthese-Stufe aus.
 
     Returns:
@@ -391,7 +423,7 @@ def run_stage2(market, mech_signals, mech_score, stage1_results,
     """
     user_prompt = build_synthesis_prompt(
         market, mech_signals, mech_score, stage1_results,
-        history, theses, researches, news_results,
+        history, theses, researches, news_results, lessons,
     )
 
     for attempt in range(max_retries + 1):
@@ -454,10 +486,15 @@ def merge_multistage_analysis(date_str, market, mech_signals, mech_score,
         },
         "sentiment_events": sentiment_events,
         "recommendation": s2.get("recommendation", {"action": "hold", "detail": ""}),
+        "thesis_resolutions": s2.get("thesis_resolutions", []),
         "thesis": s2.get("thesis"),
         "escalation_trigger": s2.get("escalation_trigger"),
         "crash_rule_active": s2.get("crash_rule_active", False),
         "market_context": s2.get("market_context"),
+        "key_levels": s2.get("key_levels"),
+        "risk_assessment": s2.get("risk_assessment"),
+        "action_triggers": s2.get("action_triggers"),
+        "historical_comparison": s2.get("historical_comparison"),
     }
 
     return analysis
@@ -513,6 +550,10 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
         {"date": date_str},
         {"raw_headlines": 0},
     ))
+    lessons = list(db.theses.find(
+        {"status": "resolved", "lessons_learned": {"$ne": None}},
+        {"statement": 1, "lessons_learned": 1},
+    ))
 
     # 5. Stage 1: Signal-Analysten (4 parallel)
     print("Stage 1: Bewerte Signale (4 Analysten parallel)...")
@@ -530,7 +571,7 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
     try:
         stage2_result, synthesis_text = run_stage2(
             market, mech_signals, mech_score, stage1_results,
-            history, theses, researches, news_results,
+            history, theses, researches, news_results, lessons,
         )
     except Exception as e:
         log.error("Synthese fehlgeschlagen: %s", e)
@@ -552,7 +593,7 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
         # Retry: nur Stage 2 wiederholen mit Fehler-Kontext
         retry_user = build_synthesis_prompt(
             market, mech_signals, mech_score, stage1_results,
-            history, theses, researches, news_results,
+            history, theses, researches, news_results, lessons,
         )
         retry_user += (
             "\n\nWICHTIG: Die letzte Analyse hatte Validierungsfehler:\n"

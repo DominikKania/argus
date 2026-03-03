@@ -168,6 +168,26 @@ export interface AnalysisPrompts {
   stages?: Record<string, StagePrompt>
 }
 
+export interface KeyLevels {
+  support: string
+  resistance: string
+  pivot_note: string
+}
+
+export type RiskLevel = 'low' | 'moderate' | 'elevated' | 'high' | 'extreme'
+
+export interface RiskAssessment {
+  level: RiskLevel
+  primary_risks: string[]
+  mitigating_factors: string[]
+}
+
+export interface ActionTriggers {
+  buy_trigger: string
+  sell_trigger: string
+  watch_items: string[]
+}
+
 export interface Analysis {
   _id: string
   date: string
@@ -181,6 +201,10 @@ export interface Analysis {
   escalation_trigger?: string
   crash_rule_active?: boolean
   market_context?: MarketContext | null
+  key_levels?: KeyLevels | null
+  risk_assessment?: RiskAssessment | null
+  action_triggers?: ActionTriggers | null
+  historical_comparison?: string | null
 }
 
 export interface OpenThesis {
@@ -193,4 +217,7 @@ export interface OpenThesis {
   expected_if_positive?: string
   expected_if_negative?: string
   status: 'open' | 'resolved'
+  resolution?: string
+  resolution_date?: string
+  lessons_learned?: string
 }

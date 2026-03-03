@@ -24,6 +24,9 @@
         <span v-if="runResult" :class="['result-badge', `result-${runResult.rating?.toLowerCase()}`]">
           {{ runResult.rating }} ({{ runResult.score }}/4) — {{ runResult.action }}
         </span>
+        <button v-if="runResult && !running" class="chat-trigger" v-tooltip.top="'Frag den Tutor'" @click.stop="askAboutAnalysis">
+          <i class="pi pi-comments" />
+        </button>
         <i v-if="running && !runResult" class="pi pi-spin pi-spinner spinner" />
       </button>
 
@@ -264,7 +267,10 @@
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ApiService } from '@/services/apiService'
 import { API_ENDPOINTS } from '@/config/apiEndpoints'
+import { useChatStore } from '@/stores/chatStore'
 import type { AnalysisPrompts } from '@/types/ampel'
+
+const chatStore = useChatStore()
 
 // ── Types ──
 interface ResearchTopic {
@@ -395,6 +401,19 @@ async function toggleTarget(research: ResearchTopic, target: string) {
   }
 }
 
+// ── Chat about analysis ──
+function askAboutAnalysis() {
+  if (!runResult.value) return
+  const signalSummary = Object.entries(signalResults)
+    .map(([name, s]) => `${signalLabels[name]}: ${s.context}`)
+    .join(', ')
+  chatStore.openWithContext(
+    `Erkläre mir die aktuelle Ampel-Analyse: Rating ${runResult.value.rating} (Score ${runResult.value.score}/4), ` +
+    `Empfehlung: ${runResult.value.action}. Signale: ${signalSummary}. ` +
+    `Was bedeutet das für mein MSCI World ETF?`
+  )
+}
+
 // ── Run Analysis (SSE) ──
 async function runAnalysis() {
   if (running.value) return
@@ -476,6 +495,10 @@ async function runAnalysis() {
     runError.value = `Verbindung fehlgeschlagen: ${e}`
   } finally {
     running.value = false
+    // Reload news after analysis (backend fetches fresh news during run)
+    try {
+      newsTopics.value = await ApiService.get<NewsResult[]>(API_ENDPOINTS.NEWS.LATEST)
+    } catch { /* ignore */ }
   }
 }
 
@@ -512,6 +535,19 @@ onMounted(async () => {
         rating: (latest.rating as Record<string, unknown>)?.overall as string || '',
         score: (latest.rating as Record<string, unknown>)?.mechanical_score as number || 0,
         action: (latest.recommendation as Record<string, unknown>)?.action as string || '',
+      }
+      // Restore signal results from saved analysis
+      const signals = latest.signals as Record<string, Record<string, unknown>> | undefined
+      if (signals) {
+        for (const name of ['trend', 'volatility', 'macro', 'sentiment']) {
+          const s = signals[name]
+          if (s) {
+            signalResults[name] = {
+              context: (s.context as string) || '',
+              note: (s.note as string) || '',
+            }
+          }
+        }
       }
     }
     const market = latest?.market as Record<string, unknown> | undefined
@@ -568,6 +604,20 @@ onMounted(async () => {
   gap: 0.5rem;
 
   i.pi-database { color: var(--p-primary-500); font-size: 1.125rem; }
+}
+
+.chat-trigger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  color: var(--p-text-color-secondary);
+  opacity: 0.6;
+  transition: all 0.15s;
+  font-size: 0.875rem;
+
+  &:hover { opacity: 1; color: var(--p-primary-500); background: var(--p-surface-ground); }
 }
 
 .run-button {

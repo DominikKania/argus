@@ -308,17 +308,47 @@ def build_history_context(history: list) -> list[str]:
     return lines
 
 
+def build_lessons_context(lessons: list) -> list[str]:
+    """Build lessons learned from resolved theses for the synthesis prompt."""
+    if not lessons:
+        return []
+
+    lines = [
+        "",
+        "## ERKENNTNISSE AUS FRÜHEREN THESEN",
+        "Diese Regeln stammen aus aufgelösten Thesen. Berücksichtige sie in deiner Analyse:",
+    ]
+    for lesson in lessons:
+        statement = lesson.get("statement", "")
+        learned = lesson.get("lessons_learned", "")
+        if learned:
+            lines.append(f"\n- **{statement[:80]}:** {learned}")
+    return lines
+
+
 def build_theses_context(theses: list) -> list[str]:
-    """Build open theses lines."""
+    """Build open theses lines with IDs and full detail for duplicate avoidance and resolution."""
     if not theses:
         return []
 
-    lines = ["", "## OFFENE THESEN"]
+    lines = [
+        "",
+        "## OFFENE THESEN",
+        "Prüfe jede These: Ist sie durch die aktuellen Marktdaten bestätigt/widerlegt?",
+        "Falls ja → in thesis_resolutions aufnehmen. Keine Duplikate als neue These erstellen!",
+    ]
     for t in theses:
-        cat_info = ""
+        tid = str(t.get("_id", ""))
+        lines.append(f"\n### These [{tid}] — erstellt {t['created_date']}")
+        lines.append(f"Statement: {t['statement']}")
+        if t.get("catalyst"):
+            lines.append(f"Katalysator: {t['catalyst']}")
         if t.get("catalyst_date"):
-            cat_info = f" (Katalysator: {t['catalyst_date']})"
-        lines.append(f"- [{t['created_date']}] {t['statement']}{cat_info}")
+            lines.append(f"Katalysator-Datum: {t['catalyst_date']}")
+        if t.get("expected_if_positive"):
+            lines.append(f"Wenn positiv: {t['expected_if_positive']}")
+        if t.get("expected_if_negative"):
+            lines.append(f"Wenn negativ: {t['expected_if_negative']}")
 
     return lines
 
@@ -522,11 +552,12 @@ def build_synthesis_prompt(
     theses: list,
     researches: Optional[list] = None,
     news_results: Optional[list] = None,
+    lessons: Optional[list] = None,
 ) -> str:
     """Build user prompt for the Synthesis stage.
 
     Receives all 4 signal assessments from Stage 1 plus broader context
-    (history, theses, research, news) to produce the overall rating.
+    (history, theses, research, news, lessons) to produce the overall rating.
     """
     lines = [
         f"Erstelle die Gesamt-Synthese für {datetime.now().strftime('%Y-%m-%d')}.",
@@ -572,10 +603,11 @@ def build_synthesis_prompt(
     if cs:
         lines.append(f"- Credit Spread: {cs['direction']} ({cs['spread_proxy']:+.2f}pp)")
 
-    # Research, News, History, Theses
+    # Research, News, History, Theses, Lessons
     lines.extend(build_research_context(researches or []))
     lines.extend(build_news_context(news_results or []))
     lines.extend(build_history_context(history))
     lines.extend(build_theses_context(theses))
+    lines.extend(build_lessons_context(lessons or []))
 
     return "\n".join(lines)

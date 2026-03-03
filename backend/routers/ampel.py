@@ -53,6 +53,11 @@ class UpdateThesisRequest(BaseModel):
     catalyst_date: Optional[str] = None
     expected_if_positive: Optional[str] = None
     expected_if_negative: Optional[str] = None
+    lessons_learned: Optional[str] = None
+
+
+class ExtractLessonsRequest(BaseModel):
+    messages: list[dict]
 
 
 class RefineThesisRequest(BaseModel):
@@ -152,20 +157,23 @@ def get_prompts():
     signals, score = calculate_mechanical_signals(market)
 
     history = list(db.analyses.find({}, {"_id": 0}).sort("date", -1).limit(6))[1:]
-    theses = list(db.theses.find({"status": "open"}, {"_id": 0}))
+    theses = list(db.theses.find({"status": "open"}))
     researches = list(db.researches.find(
         {"status": "completed", "relevance_summary": {"$ne": None}},
-        {"_id": 0},
     ))
     news_results = []
     seen_topics = set()
     for nr in db.news_results.find(
-        {}, {"raw_headlines": 0, "_id": 0}
+        {}, {"raw_headlines": 0}
     ).sort("date", -1):
         topic = nr.get("topic", "")
         if topic not in seen_topics:
             seen_topics.add(topic)
             news_results.append(nr)
+    lessons = list(db.theses.find(
+        {"status": "resolved", "lessons_learned": {"$ne": None}},
+        {"statement": 1, "lessons_learned": 1},
+    ))
 
     return {
         "stages": {
@@ -187,7 +195,10 @@ def get_prompts():
             },
             "synthesis": {
                 "system": SYNTHESIS_PROMPT,
-                "user": "(Ben\u00f6tigt Stage 1 Ergebnisse \u2014 nicht in Vorschau verf\u00fcgbar)",
+                "user": build_synthesis_prompt(
+                    market, signals, score, {},
+                    history, theses, researches, news_results, lessons,
+                ),
             },
         },
     }
@@ -214,13 +225,23 @@ def run_ampel_analysis():
                 db.theses.delete_many({"analysis_id": existing["_id"]})
                 yield _sse_event("status", f"Bestehende Analyse f\u00fcr {date_str} gel\u00f6scht.")
 
-            # 1. Market data
+            # 1. Sync prices first (update latest close)
+            yield _sse_event("status", "Synchronisiere Kursdaten...")
+            try:
+                from .prices import sync_prices
+                sync_result = sync_prices()
+                total_new = sync_result.get("total_new_records", 0)
+                yield _sse_event("status", f"Kursdaten synchronisiert ({total_new} neue Einträge).")
+            except Exception as e:
+                yield _sse_event("status", f"Kurs-Sync fehlgeschlagen: {e}")
+
+            # 2. Market data
             yield _sse_event("status", "Hole Marktdaten...")
             market = fetch_all_market_data(db)
             mech_signals, mech_score = calculate_mechanical_signals(market)
             yield _sse_event("status", f"Marktdaten geladen. Score: {mech_score}/4")
 
-            # 2. News
+            # 3. News
             active_news = db.news_topics.count_documents({"active": True})
             if active_news > 0:
                 yield _sse_event("status", f"Sammle News f\u00fcr {active_news} Topics...")
@@ -231,7 +252,7 @@ def run_ampel_analysis():
                 except Exception as e:
                     yield _sse_event("status", f"News-Sammlung fehlgeschlagen: {e}")
 
-            # 3. Load context
+            # 4. Load context
             yield _sse_event("status", "Lade Kontext (Historie, Thesen, Research, News)...")
             history = list(db.analyses.find(sort=[("date", -1)]).limit(5))
             theses = list(db.theses.find({"status": "open"}).sort("created_date", -1))
@@ -242,7 +263,7 @@ def run_ampel_analysis():
                 {"date": date_str}, {"raw_headlines": 0},
             ))
 
-            # 4. Stage 1: Signal-Analysten (4 parallel)
+            # 5. Stage 1: Signal-Analysten (4 parallel)
             yield _sse_event("status", "Stage 1: Bewerte Signale (4 Analysten parallel)...")
             stage1_results = run_stage1(market, mech_signals, news_results, researches)
 
@@ -262,11 +283,17 @@ def run_ampel_analysis():
                         "note": "Fallback auf mechanisches Signal",
                     })
 
+            # 4b. Load lessons from resolved theses
+            lessons = list(db.theses.find(
+                {"status": "resolved", "lessons_learned": {"$ne": None}},
+                {"statement": 1, "lessons_learned": 1},
+            ))
+
             # 5. Stage 2: Synthese (streamed)
             yield _sse_event("status", "Stage 2: Synthese...")
             synthesis_user = build_synthesis_prompt(
                 market, mech_signals, mech_score, stage1_results,
-                history, theses, researches, news_results,
+                history, theses, researches, news_results, lessons,
             )
             yield _sse_event("prompt", {"system": SYNTHESIS_PROMPT, "user": synthesis_user})
 
@@ -374,6 +401,14 @@ def get_theses():
     return [_serialize_doc(doc) for doc in cursor]
 
 
+@router.get("/theses/resolved")
+def get_resolved_theses():
+    """Get resolved theses for learning/review, newest first."""
+    db = get_db()
+    cursor = db.theses.find({"status": "resolved"}).sort("resolution_date", -1).limit(20)
+    return [_serialize_doc(doc) for doc in cursor]
+
+
 @router.put("/theses/{thesis_id}")
 def update_thesis(thesis_id: str, req: UpdateThesisRequest):
     """Update an open thesis."""
@@ -388,7 +423,7 @@ def update_thesis(thesis_id: str, req: UpdateThesisRequest):
         raise HTTPException(status_code=404, detail="These nicht gefunden.")
 
     update = {}
-    for field in ("statement", "catalyst", "catalyst_date", "expected_if_positive", "expected_if_negative"):
+    for field in ("statement", "catalyst", "catalyst_date", "expected_if_positive", "expected_if_negative", "lessons_learned"):
         val = getattr(req, field, None)
         if val is not None:
             update[field] = val
@@ -397,6 +432,59 @@ def update_thesis(thesis_id: str, req: UpdateThesisRequest):
         raise HTTPException(status_code=400, detail="Keine \u00c4nderungen angegeben.")
 
     db.theses.update_one({"_id": oid}, {"$set": update})
+    updated = db.theses.find_one({"_id": oid})
+    return _serialize_doc(updated)
+
+
+@router.post("/theses/{thesis_id}/extract-lessons")
+def extract_lessons(thesis_id: str, req: ExtractLessonsRequest):
+    """Extract actionable lessons from a full chat conversation about a resolved thesis."""
+    db = get_db()
+    try:
+        oid = ObjectId(thesis_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Ungültige Thesis-ID.")
+
+    doc = db.theses.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="These nicht gefunden.")
+
+    # Build conversation transcript
+    transcript_lines = []
+    for msg in req.messages:
+        role = "User" if msg.get("role") == "user" else "Tutor"
+        transcript_lines.append(f"{role}: {msg.get('content', '')}")
+    transcript = "\n\n".join(transcript_lines)
+
+    system_prompt = """\
+Du bist ein Experte für Investment-Lernprozesse. Du analysierst Gespräche über aufgelöste Investment-Thesen \
+und extrahierst daraus konkrete, umsetzbare Regeln für zukünftige Analysen.
+
+## DEINE AUFGABE
+Lies das gesamte Gespräch und extrahiere die KERNERKENNTNISSE als klare Regeln.
+
+## FORMAT
+- Formuliere jede Erkenntnis als konkrete Handlungsregel (z.B. "Bei SMA50-Bruch sofort prüfen ob...")
+- Maximal 3-5 Regeln, nur die wichtigsten
+- Jede Regel auf 1-2 Sätze
+- Formuliere so, dass ein LLM die Regeln direkt in einer Analyse anwenden kann
+- Trenne die Regeln mit Zeilenumbrüchen
+- KEIN Markdown, keine Nummerierung, keine Überschriften — nur die reinen Regeln"""
+
+    user_msg = f"""## AUFGELÖSTE THESE
+Statement: {doc.get('statement', '')}
+Resolution: {doc.get('resolution', '')}
+
+## GESAMTES GESPRÄCH
+{transcript}
+
+Extrahiere die wichtigsten Erkenntnisse als klare Regeln:"""
+
+    from ..llm import call_llm
+    lessons = call_llm(system_prompt, [{"role": "user", "content": user_msg}], max_tokens=1024)
+
+    # Save to DB
+    db.theses.update_one({"_id": oid}, {"$set": {"lessons_learned": lessons.strip()}})
     updated = db.theses.find_one({"_id": oid})
     return _serialize_doc(updated)
 
