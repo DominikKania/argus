@@ -120,6 +120,22 @@ def ensure_indexes(db):
         upsert=True,
     )
 
+    # Top-Holdings automatisch in Watchlist eintragen
+    portfolio = db.portfolio.find_one({"_id": "default"})
+    if portfolio and portfolio.get("top_holdings"):
+        today = datetime.now().strftime("%Y-%m-%d")
+        for h in portfolio["top_holdings"]:
+            db.watchlist.update_one(
+                {"ticker": h["ticker"]},
+                {"$setOnInsert": {
+                    "ticker": h["ticker"],
+                    "name": h.get("name", h["ticker"]),
+                    "added_date": today,
+                    "category": "stock",
+                }},
+                upsert=True,
+            )
+
 
 # ── Validierung ─────────────────────────────────────────────────────────────
 
