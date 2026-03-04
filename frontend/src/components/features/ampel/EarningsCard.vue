@@ -43,7 +43,7 @@
     </div>
 
     <!-- Sector Breakdown -->
-    <div class="extended-section">
+    <div v-if="earnings.by_sector && Object.keys(earnings.by_sector).length" class="extended-section">
       <h4 class="column-title">Sektoren</h4>
       <div class="sector-grid">
         <div v-for="(data, sector) in earnings.by_sector" :key="sector" class="ext-tile">
@@ -84,11 +84,11 @@
     </div>
 
     <!-- Earnings Calendar -->
-    <div v-if="earnings.upcoming.length || earnings.recently_reported.length" class="extended-section">
+    <div v-if="earnings.upcoming?.length || earnings.recently_reported?.length" class="extended-section">
       <h4 class="column-title">Kalender</h4>
       <div class="calendar-grid">
         <!-- Upcoming -->
-        <div v-if="earnings.upcoming.length" class="calendar-column">
+        <div v-if="earnings.upcoming?.length" class="calendar-column">
           <span class="calendar-subtitle">Anstehend</span>
           <div v-for="e in earnings.upcoming" :key="e.ticker + e.date" class="calendar-item">
             <span class="cal-ticker">{{ e.ticker }}</span>
@@ -97,7 +97,7 @@
           </div>
         </div>
         <!-- Recently Reported -->
-        <div v-if="earnings.recently_reported.length" class="calendar-column">
+        <div v-if="earnings.recently_reported?.length" class="calendar-column">
           <span class="calendar-subtitle">Kürzlich gemeldet</span>
           <div v-for="e in earnings.recently_reported" :key="e.ticker + e.date" class="calendar-item">
             <span class="cal-ticker">{{ e.ticker }}</span>

@@ -440,6 +440,31 @@ def build_trend_analyst_prompt(market: dict, mech_signals: dict, researches: Opt
     if seas:
         lines.append(f"- Saisonaler Bias: {seas['seasonal_bias']} (avg {seas['avg_return_pct']:+.2f}%)")
 
+    # Top Holdings — Marktbreite des Trends
+    th = market.get("top_holdings")
+    if th and th.get("holdings"):
+        lines.append("")
+        lines.append(f"## TOP-HOLDINGS BREITE ({th['above_sma50_count']}/{th['total_count']} über SMA50, {th['above_sma50_pct']}%)")
+        for h in th["holdings"]:
+            puffer_str = f"Puffer SMA50: {h['puffer_sma50_pct']:+.1f}%" if h.get("puffer_sma50_pct") is not None else "SMA50: n/a"
+            lines.append(f"- {h['name']} ({h['ticker']}, {h['sector']}, {h['weight_pct']}%): ${h['price']} | {puffer_str} | 1M: {h['perf_1m_pct']:+.1f}%")
+
+        # Holdings-Divergenz
+        div = th.get("divergence")
+        if div:
+            lines.append("")
+            lines.append("## HOLDINGS-DIVERGENZ (ETF vs. Kernpositionen)")
+            lines.append(f"- ETF Puffer SMA50: {div['etf_puffer_pct']:+.1f}%")
+            lines.append(f"- Holdings Ø Puffer SMA50 (gewichtet): {div['holdings_avg_puffer_pct']:+.1f}%")
+            lines.append(f"- Divergenz (ETF − Holdings): {div['gap_pct']:+.1f}pp")
+            if div["compensation_active"]:
+                lines.append("- ⚠ Kompensation durch defensive Sektoren AKTIV")
+            tech_puffer = th.get("tech_avg_puffer_pct")
+            if tech_puffer is not None:
+                lines.append(f"- Tech-Holdings Ø Puffer: {tech_puffer:+.1f}%")
+                if div["tech_drag"]:
+                    lines.append("- ⚠ Tech-Drag AKTIV — kein Treibstoff für neue Hochs")
+
     targeted = _filter_researches_for(researches or [], "trend")
     lines.extend(build_research_context(targeted))
 
@@ -624,6 +649,24 @@ def build_synthesis_prompt(
     cs = market.get("credit_spread")
     if cs:
         lines.append(f"- Credit Spread: {cs['direction']} ({cs['spread_proxy']:+.2f}pp)")
+
+    # Top Holdings — Gesamtbild Marktbreite + Divergenz
+    th = market.get("top_holdings")
+    if th and th.get("holdings"):
+        avg_p = th.get("avg_puffer_sma50_pct")
+        avg_str = f" | Ø Puffer: {avg_p:+.1f}%" if avg_p is not None else ""
+        lines.append(f"- Top-Holdings: {th['above_sma50_count']}/{th['total_count']} über SMA50{avg_str}")
+        div = th.get("divergence")
+        if div:
+            lines.append(f"  ETF vs Holdings Divergenz: {div['gap_pct']:+.1f}pp {'(Kompensation aktiv)' if div['compensation_active'] else ''}")
+            if div["tech_drag"]:
+                tech_p = th.get("tech_avg_puffer_pct")
+                lines.append(f"  Tech-Drag aktiv (Ø {tech_p:+.1f}% unter SMA50)" if tech_p else "  Tech-Drag aktiv")
+        weak = [h for h in th["holdings"] if h.get("above_sma50") is False]
+        if weak:
+            worst = sorted(weak, key=lambda h: h.get("puffer_sma50_pct") or 0)[:3]
+            parts = [f"{h['ticker']} ({h.get('puffer_sma50_pct', 0):+.1f}%)" for h in worst]
+            lines.append(f"  Schwächste: {', '.join(parts)}")
 
     # Research, News, History, Theses, Lessons
     lines.extend(build_research_context(researches or []))

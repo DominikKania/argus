@@ -3,7 +3,7 @@ import MainLayout from '@/components/layout/MainLayout.vue'
 
 const routes = [
   {
-    path: '',
+    path: '/',
     component: MainLayout,
     children: [
       {

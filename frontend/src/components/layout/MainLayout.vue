@@ -7,7 +7,9 @@
       <TopBar />
 
       <div class="layout-content">
-        <router-view />
+        <router-view v-slot="{ Component, route }">
+          <component :is="Component" :key="route.path" />
+        </router-view>
       </div>
     </div>
 
@@ -51,6 +53,7 @@ const { isExpanded } = useNavigation()
   flex-direction: column;
   height: calc(100vh - 4rem);
   margin-top: 4rem;
+  overflow-y: auto;
 }
 
 @media screen and (min-width: 769px) {

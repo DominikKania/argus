@@ -229,6 +229,49 @@
       </div>
     </div>
 
+    <!-- ── Top-Holdings-Kontext ───────────────────────── -->
+    <div v-if="topHoldings" class="module-section">
+      <button class="section-header" @click="sections.holdings = !sections.holdings">
+        <i :class="sections.holdings ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" />
+        <i class="pi pi-building section-icon" />
+        <span>Top-Holdings-Kontext</span>
+        <span :class="['health-badge', holdingsHealthClass]">
+          {{ topHoldings.above_sma50_count }}/{{ topHoldings.total_count }} über SMA50
+        </span>
+      </button>
+
+      <div v-if="sections.holdings" class="section-body">
+        <!-- SMA50 Bar -->
+        <div class="holdings-sma-bar">
+          <div class="holdings-sma-track">
+            <div class="holdings-sma-fill" :class="holdingsHealthClass" :style="{ width: topHoldings.above_sma50_pct + '%' }" />
+          </div>
+          <span class="holdings-sma-label">{{ topHoldings.above_sma50_pct }}% über SMA50</span>
+        </div>
+
+        <!-- Holdings List -->
+        <div class="holdings-list">
+          <div
+            v-for="h in topHoldings.holdings"
+            :key="h.ticker"
+            class="holdings-row"
+            :class="{ 'row-below': h.above_sma50 === false }"
+          >
+            <span class="h-ticker">{{ h.ticker }}</span>
+            <span class="h-name">{{ h.name }}</span>
+            <span class="h-weight">{{ h.weight_pct }}%</span>
+            <span class="h-price">${{ h.price }}</span>
+            <span class="h-perf" :class="h.perf_1m_pct >= 0 ? 'perf-up' : 'perf-down'">
+              {{ h.perf_1m_pct >= 0 ? '+' : '' }}{{ h.perf_1m_pct?.toFixed(1) }}%
+            </span>
+            <span class="h-sma" :class="h.above_sma50 ? 'sma-above' : 'sma-below'">
+              {{ h.above_sma50 ? '✓ >SMA50' : '✗ <SMA50' }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Analyse-Prompts (per Stage) ─────────────────── -->
     <div class="module-section">
       <button class="section-header" @click="openPromptSection">
@@ -315,7 +358,7 @@ const signalLabels: Record<string, string> = {
 }
 
 // ── State ──
-const sections = reactive({ research: false, news: false, prompt: false, llmOutput: false, earnings: false })
+const sections = reactive({ research: false, news: false, prompt: false, llmOutput: false, earnings: false, holdings: false })
 const signalResults = reactive<Record<string, SignalResult>>({})
 const expanded = reactive<Record<string, boolean>>({})
 
@@ -328,6 +371,15 @@ const loadingNews = ref(false)
 const errorNews = ref('')
 
 const earnings = ref<Record<string, unknown> | null>(null)
+const topHoldings = ref<Record<string, unknown> | null>(null)
+
+const holdingsHealthClass = computed(() => {
+  if (!topHoldings.value) return ''
+  const pct = topHoldings.value.above_sma50_pct as number
+  if (pct >= 70) return 'health-strong'
+  if (pct >= 40) return 'health-moderate'
+  return 'health-weak'
+})
 
 const prompts = ref<AnalysisPrompts | null>(null)
 const loadingPrompts = ref(false)
@@ -557,6 +609,9 @@ onMounted(async () => {
     const market = latest?.market as Record<string, unknown> | undefined
     if (market?.earnings) {
       earnings.value = market.earnings as Record<string, unknown>
+    }
+    if (market?.top_holdings) {
+      topHoldings.value = market.top_holdings as Record<string, unknown>
     }
   } catch {
     // No analysis yet — that's fine
@@ -1039,6 +1094,80 @@ onMounted(async () => {
 
 .chip-icon {
   font-size: 0.7rem;
+}
+
+// ── Top-Holdings context ──
+.holdings-sma-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.holdings-sma-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--p-surface-200);
+  overflow: hidden;
+
+  :root.dark & { background: var(--p-surface-700); }
+}
+
+.holdings-sma-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+
+  &.health-strong { background: #10b981; }
+  &.health-moderate { background: #f59e0b; }
+  &.health-weak { background: #ef4444; }
+}
+
+.holdings-sma-label {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--p-text-color-secondary);
+  white-space: nowrap;
+}
+
+.holdings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.holdings-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  background: var(--p-surface-ground);
+  border: 1px solid var(--p-surface-border);
+
+  &.row-below {
+    border-color: rgba(239, 68, 68, 0.2);
+    background: rgba(239, 68, 68, 0.03);
+    :root.dark & { background: rgba(239, 68, 68, 0.06); }
+  }
+}
+
+.h-ticker { font-weight: 700; min-width: 3.5rem; color: var(--p-text-color); }
+.h-name { flex: 1; color: var(--p-text-color-secondary); font-size: 0.7rem; }
+.h-weight { font-size: 0.65rem; color: var(--p-text-color-secondary); min-width: 2.5rem; text-align: right; }
+.h-price { font-weight: 600; min-width: 4rem; text-align: right; color: var(--p-text-color); }
+.h-perf {
+  font-weight: 600; min-width: 3.5rem; text-align: right;
+  &.perf-up { color: #10b981; }
+  &.perf-down { color: #ef4444; }
+}
+.h-sma {
+  font-size: 0.65rem; font-weight: 600; min-width: 4.5rem; text-align: center;
+  padding: 0.125rem 0.375rem; border-radius: 4px;
+  &.sma-above { color: #10b981; background: rgba(16, 185, 129, 0.08); }
+  &.sma-below { color: #ef4444; background: rgba(239, 68, 68, 0.08); }
 }
 
 // ── Status messages ──

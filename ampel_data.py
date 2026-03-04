@@ -879,6 +879,8 @@ def fetch_top_holdings_data(db):
             one_month_ago = len(close_series) - 22 if len(close_series) >= 22 else 0
             perf_1m = ((current / float(close_series.iloc[one_month_ago])) - 1) * 100
 
+            puffer = round(((current / sma50_val) - 1) * 100, 2) if sma50_val and sma50_val == sma50_val else None
+
             results.append({
                 "ticker": ticker,
                 "name": h.get("name", ticker),
@@ -887,6 +889,7 @@ def fetch_top_holdings_data(db):
                 "price": round(current, 2),
                 "sma50": round(sma50_val, 2) if sma50_val and sma50_val == sma50_val else None,
                 "above_sma50": current > sma50_val if sma50_val and sma50_val == sma50_val else None,
+                "puffer_sma50_pct": puffer,
                 "perf_1m_pct": round(perf_1m, 2),
             })
         except Exception as e:
@@ -898,11 +901,27 @@ def fetch_top_holdings_data(db):
     above_count = sum(1 for r in results if r.get("above_sma50") is True)
     total = sum(1 for r in results if r.get("above_sma50") is not None)
 
+    # Gewichteter Durchschnitt Puffer SMA50
+    with_puffer = [r for r in results if r.get("puffer_sma50_pct") is not None]
+    total_weight = sum(r["weight_pct"] for r in with_puffer) or 1
+    avg_puffer = sum(r["puffer_sma50_pct"] * r["weight_pct"] for r in with_puffer) / total_weight
+
+    # Tech vs Nicht-Tech Aufschlüsselung
+    tech = [r for r in with_puffer if r.get("sector", "").lower() == "tech"]
+    non_tech = [r for r in with_puffer if r.get("sector", "").lower() != "tech"]
+    tech_avg_puffer = (sum(r["puffer_sma50_pct"] * r["weight_pct"] for r in tech)
+                       / (sum(r["weight_pct"] for r in tech) or 1)) if tech else None
+    non_tech_avg_perf = (sum(r["perf_1m_pct"] * r["weight_pct"] for r in non_tech)
+                         / (sum(r["weight_pct"] for r in non_tech) or 1)) if non_tech else None
+
     return {
         "holdings": results,
         "above_sma50_count": above_count,
         "total_count": total,
         "above_sma50_pct": round(above_count / total * 100) if total else 0,
+        "avg_puffer_sma50_pct": round(avg_puffer, 2),
+        "tech_avg_puffer_pct": round(tech_avg_puffer, 2) if tech_avg_puffer is not None else None,
+        "non_tech_avg_perf_1m_pct": round(non_tech_avg_perf, 2) if non_tech_avg_perf is not None else None,
     }
 
 
@@ -937,12 +956,29 @@ def fetch_all_market_data(db, cpi_override=None):
                 log.warning("%s fehlgeschlagen: %s", key, e)
                 extended[key] = None
 
-    return {
+    market = {
         **iwda,
         "vix": vix,
         "yields": yields,
         **extended,
     }
+
+    # ETF-Holdings-Divergenz berechnen
+    th = market.get("top_holdings")
+    if th and th.get("avg_puffer_sma50_pct") is not None:
+        etf_puffer = market.get("puffer_sma50_pct", 0)
+        holdings_puffer = th["avg_puffer_sma50_pct"]
+        gap = round(etf_puffer - holdings_puffer, 2)
+        tech_puffer = th.get("tech_avg_puffer_pct")
+        th["divergence"] = {
+            "etf_puffer_pct": etf_puffer,
+            "holdings_avg_puffer_pct": holdings_puffer,
+            "gap_pct": gap,
+            "compensation_active": gap > 3.0,
+            "tech_drag": tech_puffer is not None and tech_puffer < -3.0,
+        }
+
+    return market
 
 
 # ── Mechanische Signale ──────────────────────────────────────────────────

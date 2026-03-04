@@ -89,6 +89,17 @@ Kurs vs. SMA50. Du bewertest den breiteren Kontext.
 - Sektor-Rotation und regionale Daten als Zusatzkontext
 - Saisonalit\u00e4t ist kein Signal allein, nur Kontext
 
+## HOLDINGS-DIVERGENZ REGELN
+- Wenn ETF nahe SMA50 (Puffer < 2%) aber Holdings \u00d8 Puffer < -3%:
+  \u2192 "Kompensierte Schw\u00e4che" = gelb, auch wenn mechanisch gr\u00fcn
+  \u2192 Der ETF h\u00e4lt sich nur durch Sektorrotation, nicht durch St\u00e4rke der Kernpositionen
+- Wenn Divergenz (ETF minus Holdings Puffer) > 5pp:
+  \u2192 Warnung: Kompensation durch defensive Sektoren ist aktiv aber nicht nachhaltig
+- Wenn Tech-Holdings \u00d8 Puffer < -5%:
+  \u2192 "Kein Rally-Treibstoff" \u2014 f\u00fcr ein neues ATH m\u00fcssen die Tech-Schwergewichte \u00fcber SMA50 zur\u00fcckkehren
+  \u2192 Ein ETF-Kurs nahe SMA50 ist in diesem Fall KEIN Kaufsignal
+- IWDA ist breit genug um Sektor-Crashs zu absorbieren, aber nicht breit genug um ohne Tech ein neues Hoch zu erreichen (Tech = 22%+ Gewicht)
+
 ## AUSGABE
 Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
 {
@@ -294,7 +305,7 @@ REGELN:
 - thesis: Statement, Katalysator und Szenarien m\u00fcssen ohne Vorwissen verst\u00e4ndlich sein
 - thesis: Pr\u00fcfe die OFFENEN THESEN im Kontext. Erstelle NUR eine neue These wenn sie ein KOMPLETT NEUES Thema abdeckt das in KEINER bestehenden These vorkommt. Auch Kombinationen oder Zusammenfassungen bestehender Thesen sind DUPLIKATE! Wenn Nahost UND Z\u00f6lle schon als separate Thesen existieren, ist "Nahost und Z\u00f6lle entscheiden..." ein Duplikat. thesis: null ist der NORMALFALL wenn bereits offene Thesen existieren.
 - thesis_resolutions: NUR auflösen wenn die These EINDEUTIG eingetreten oder widerlegt ist! Eine These die "noch läuft", "weiter gilt" oder "noch nicht entschieden" ist, wird NICHT aufgelöst. Konkreter Test: Kannst du klar sagen "Die These ist eingetreten weil X" oder "Die These ist widerlegt weil Y"? Wenn nein → NICHT auflösen. Leeres Array [] ist der Normalfall. Im Zweifel: nicht auflösen.
-- thesis_probability_updates: Aktualisiere die Wahrscheinlichkeit JEDER offenen These basierend auf den aktuellen Marktdaten und Research-Erkenntnissen. Nutze historische Basisraten aus dem Research-Kontext wenn vorhanden. probability_positive_pct = Wahrscheinlichkeit dass das POSITIVE Szenario eintritt (0-100). Leeres Array [] nur wenn keine offenen Thesen existieren.
+- thesis_probability_updates: Aktualisiere die Wahrscheinlichkeit einer These NUR wenn es einen KONKRETEN NEUEN DATENPUNKT gibt der die Einschätzung verändert. Folgewirkungen bereits bekannter Ereignisse (z.B. Markt-Crash als Reaktion auf gestrige Krise) sind KEIN neuer Datenpunkt. Konkreter Test: "Welche NEUE Information rechtfertigt die Änderung?" Wenn die Antwort nur Folgewirkungen beschreibt → Wahrscheinlichkeit NICHT ändern. Beispiel: Iran-Krieg war gestern bekannt → Dow-Crash heute ist Folgewirkung → KEINE Änderung. Neue Iran-Eskalationsstufe (z.B. Nukleardrohung) → JA, das ist ein neuer Datenpunkt. probability_positive_pct = Wahrscheinlichkeit dass das POSITIVE Szenario eintritt (0-100). Leeres Array [] wenn keine offenen Thesen existieren ODER keine neuen Datenpunkte vorliegen.
 - probability_positive_pct bei neuen Thesen: IMMER setzen, basierend auf Evidenz. Nicht raten — nutze Basisraten aus Research, Marktdaten, historische Muster.
 - key_levels, risk_assessment, action_triggers: IMMER ausf\u00fcllen, nie null
 - historical_comparison: Nenne immer eine konkrete Vergleichsphase (Monat/Jahr)

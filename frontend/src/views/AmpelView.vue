@@ -99,7 +99,6 @@ onMounted(() => {
 .ampel-view {
   padding: 1.5rem;
   max-width: 1200px;
-  overflow-y: auto;
 
   @media screen and (max-width: 640px) {
     padding: 1rem;
