@@ -51,7 +51,10 @@
         <div v-else class="theses-grid">
           <div v-for="thesis in ampelStore.theses" :key="thesis._id" class="thesis-card">
             <div class="thesis-header">
-              <p class="thesis-statement">{{ thesis.statement }}</p>
+              <div class="thesis-header-text">
+                <p class="thesis-title">{{ thesis.title }}</p>
+                <p class="thesis-statement">{{ thesis.statement }}</p>
+              </div>
               <div class="thesis-actions">
                 <button class="chat-trigger" v-tooltip.top="'Besprechen & optimieren'" @click="reviewThesis(thesis)">
                   <i class="pi pi-comments" />
@@ -59,10 +62,15 @@
               </div>
             </div>
 
-            <div v-if="thesis.catalyst" class="catalyst">
+            <div class="conditions-box">
+              <span class="conditions-label">Voraussetzungen:</span>
+              <span class="conditions-text">{{ thesis.conditions }}</span>
+            </div>
+
+            <div class="catalyst">
               <span class="catalyst-label">Katalysator:</span>
               <span class="catalyst-text">{{ thesis.catalyst }}</span>
-              <span v-if="thesis.catalyst_date" class="catalyst-date-badge">
+              <span class="catalyst-date-badge">
                 <i class="pi pi-calendar" />
                 {{ thesis.catalyst_date }}
                 <span v-if="daysUntil(thesis.catalyst_date) >= 0" class="catalyst-countdown" :class="{ 'countdown-soon': daysUntil(thesis.catalyst_date) <= 7 }">
@@ -74,7 +82,7 @@
               </span>
             </div>
 
-            <div v-if="thesis.probability_positive_pct != null" class="probability-bar">
+            <div class="probability-bar">
               <div class="prob-header">
                 <span class="prob-label">Wahrscheinlichkeit positiv</span>
                 <span class="prob-value" :class="probClass(thesis.probability_positive_pct)">{{ thesis.probability_positive_pct }}%</span>
@@ -82,18 +90,65 @@
               <div class="prob-track">
                 <div class="prob-fill" :class="probClass(thesis.probability_positive_pct)" :style="{ width: thesis.probability_positive_pct + '%' }" />
               </div>
-              <p v-if="thesis.probability_reasoning" class="prob-reasoning">{{ thesis.probability_reasoning }}</p>
+              <p class="prob-reasoning">{{ thesis.probability_reasoning }}</p>
             </div>
 
             <div class="scenarios">
-              <div v-if="thesis.expected_if_positive" class="scenario scenario-positive">
+              <div class="scenario scenario-positive">
                 <span class="scenario-icon">+</span>
                 <p class="scenario-text">{{ thesis.expected_if_positive }}</p>
               </div>
-              <div v-if="thesis.expected_if_negative" class="scenario scenario-negative">
+              <div class="scenario scenario-negative">
                 <span class="scenario-icon">-</span>
                 <p class="scenario-text">{{ thesis.expected_if_negative }}</p>
               </div>
+            </div>
+
+            <div class="levels-row">
+              <span class="level-item">
+                <span class="level-label">Einstieg:</span> {{ thesis.entry_level }}
+              </span>
+              <span class="level-item">
+                <span class="level-label">Ziel:</span> {{ thesis.target_level }}
+              </span>
+              <span class="level-item level-stop">
+                <span class="level-label">Stop:</span> {{ thesis.stop_loss }}
+              </span>
+              <span v-if="computeEV(thesis) !== null" class="level-item ev-badge" :class="computeEV(thesis)! >= 0 ? 'ev-positive' : 'ev-negative'">
+                <span class="level-label">EV:</span> {{ computeEV(thesis)! >= 0 ? '+' : '' }}{{ computeEV(thesis)!.toFixed(1) }}%
+              </span>
+            </div>
+
+            <!-- Position -->
+            <div v-if="getPosition(thesis._id)" class="position-box">
+              <div class="position-header">
+                <i class="pi pi-wallet" />
+                <span class="position-label">Position</span>
+                <button class="position-close-btn" v-tooltip.top="'Position schließen'" @click="showCloseDialog(getPosition(thesis._id)!)">
+                  <i class="pi pi-times" />
+                </button>
+              </div>
+              <div class="position-details">
+                <span>Einstieg: <strong>{{ getPosition(thesis._id)!.entry_price }}€</strong> am {{ getPosition(thesis._id)!.entry_date }}</span>
+                <span v-if="getPosition(thesis._id)!.quantity">| {{ getPosition(thesis._id)!.quantity }} Stück</span>
+              </div>
+              <div v-if="computeRealCRV(thesis, getPosition(thesis._id)!)" class="position-crv">
+                <span class="crv-item" :class="computeRealCRV(thesis, getPosition(thesis._id)!)!.evClass">
+                  Realer EV: {{ computeRealCRV(thesis, getPosition(thesis._id)!)!.ev }}
+                </span>
+                <span class="crv-item">
+                  Upside: {{ computeRealCRV(thesis, getPosition(thesis._id)!)!.upside }}
+                </span>
+                <span class="crv-item crv-down">
+                  Downside: {{ computeRealCRV(thesis, getPosition(thesis._id)!)!.downside }}
+                </span>
+              </div>
+            </div>
+            <div v-else class="position-add">
+              <button class="position-add-btn" @click="showAddDialog(thesis)">
+                <i class="pi pi-plus" />
+                Position eröffnen
+              </button>
             </div>
 
             <div class="thesis-meta">
@@ -169,6 +224,50 @@
         </div>
       </template>
     </template>
+
+    <!-- Add Position Dialog -->
+    <Dialog v-model:visible="addDialogVisible" header="Position eröffnen" :modal="true" :style="{ width: '24rem' }">
+      <div class="dialog-form">
+        <div class="dialog-field">
+          <label>Einstiegspreis (€)</label>
+          <InputNumber v-model="addForm.entry_price" :min-fraction-digits="2" :max-fraction-digits="2" />
+        </div>
+        <div class="dialog-field">
+          <label>Datum</label>
+          <InputText v-model="addForm.entry_date" placeholder="YYYY-MM-DD" />
+        </div>
+        <div class="dialog-field">
+          <label>Stück (optional)</label>
+          <InputNumber v-model="addForm.quantity" />
+        </div>
+        <div class="dialog-field">
+          <label>Notiz (optional)</label>
+          <InputText v-model="addForm.notes" />
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" @click="addDialogVisible = false" />
+        <Button label="Eröffnen" @click="submitAddPosition" :disabled="!addForm.entry_price" />
+      </template>
+    </Dialog>
+
+    <!-- Close Position Dialog -->
+    <Dialog v-model:visible="closeDialogVisible" header="Position schließen" :modal="true" :style="{ width: '24rem' }">
+      <div class="dialog-form">
+        <div class="dialog-field">
+          <label>Ausstiegspreis (€)</label>
+          <InputNumber v-model="closeForm.exit_price" :min-fraction-digits="2" :max-fraction-digits="2" />
+        </div>
+        <div class="dialog-field">
+          <label>Datum</label>
+          <InputText v-model="closeForm.exit_date" placeholder="YYYY-MM-DD" />
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Abbrechen" severity="secondary" @click="closeDialogVisible = false" />
+        <Button label="Schließen" severity="danger" @click="submitClosePosition" :disabled="!closeForm.exit_price" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -176,13 +275,90 @@
 import { onMounted, ref, watch } from 'vue'
 import { useAmpelStore } from '@/stores/ampelStore'
 import { useChatStore } from '@/stores/chatStore'
-import type { OpenThesis } from '@/types/ampel'
+import type { OpenThesis, Position } from '@/types/ampel'
 import Skeleton from 'primevue/skeleton'
 import Button from 'primevue/button'
+import Dialog from 'primevue/dialog'
+import InputNumber from 'primevue/inputnumber'
+import InputText from 'primevue/inputtext'
 
 const ampelStore = useAmpelStore()
 const chatStore = useChatStore()
 const activeTab = ref<'open' | 'resolved'>('open')
+
+// ── Position Dialogs ──
+const addDialogVisible = ref(false)
+const closeDialogVisible = ref(false)
+const addForm = ref({ entry_price: null as number | null, entry_date: new Date().toISOString().slice(0, 10), quantity: null as number | null, notes: '', thesis_id: '' })
+const closeForm = ref({ exit_price: null as number | null, exit_date: new Date().toISOString().slice(0, 10), position_id: '' })
+
+function getPosition(thesisId: string): Position | undefined {
+  return ampelStore.positions.find((p) => p.thesis_id === thesisId)
+}
+
+function showAddDialog(thesis: OpenThesis) {
+  const priceMatch = thesis.entry_level?.match(/(\d+[.,]?\d*)/)
+  addForm.value = {
+    entry_price: priceMatch ? parseFloat(priceMatch[1].replace(',', '.')) : null,
+    entry_date: new Date().toISOString().slice(0, 10),
+    quantity: null,
+    notes: '',
+    thesis_id: thesis._id,
+  }
+  addDialogVisible.value = true
+}
+
+async function submitAddPosition() {
+  if (!addForm.value.entry_price) return
+  await ampelStore.createPosition({
+    entry_price: addForm.value.entry_price,
+    entry_date: addForm.value.entry_date,
+    quantity: addForm.value.quantity ?? undefined,
+    thesis_id: addForm.value.thesis_id || undefined,
+    notes: addForm.value.notes || undefined,
+  })
+  addDialogVisible.value = false
+}
+
+function showCloseDialog(position: Position) {
+  closeForm.value = {
+    exit_price: null,
+    exit_date: new Date().toISOString().slice(0, 10),
+    position_id: position._id,
+  }
+  closeDialogVisible.value = true
+}
+
+async function submitClosePosition() {
+  if (!closeForm.value.exit_price) return
+  await ampelStore.closePosition(closeForm.value.position_id, {
+    exit_price: closeForm.value.exit_price,
+    exit_date: closeForm.value.exit_date,
+  })
+  closeDialogVisible.value = false
+}
+
+function computeRealCRV(thesis: OpenThesis, position: Position) {
+  const entry = position.entry_price
+  const targetMatch = thesis.target_level?.match(/(\d+[.,]?\d*)/)
+  const stopMatch = thesis.stop_loss?.match(/(\d+[.,]?\d*)/)
+  if (!targetMatch || !stopMatch) return null
+
+  const target = parseFloat(targetMatch[1].replace(',', '.'))
+  const stop = parseFloat(stopMatch[1].replace(',', '.'))
+  const prob = thesis.probability_positive_pct / 100
+
+  const upsidePct = ((target - entry) / entry) * 100
+  const downsidePct = ((stop - entry) / entry) * 100
+  const ev = prob * upsidePct + (1 - prob) * downsidePct
+
+  return {
+    upside: `+${upsidePct.toFixed(1)}%`,
+    downside: `${downsidePct.toFixed(1)}%`,
+    ev: `${ev >= 0 ? '+' : ''}${ev.toFixed(1)}%`,
+    evClass: ev >= 0 ? 'crv-positive' : 'crv-negative',
+  }
+}
 
 function discussResolved(thesis: OpenThesis) {
   chatStore.openForLesson({
@@ -197,13 +373,32 @@ function reviewThesis(thesis: OpenThesis) {
     thesisId: thesis._id,
     statement: thesis.statement,
     thesis: {
+      title: thesis.title,
       statement: thesis.statement,
-      catalyst: thesis.catalyst || '',
-      catalyst_date: thesis.catalyst_date || '',
-      expected_if_positive: thesis.expected_if_positive || '',
-      expected_if_negative: thesis.expected_if_negative || '',
+      conditions: thesis.conditions,
+      catalyst: thesis.catalyst,
+      catalyst_date: thesis.catalyst_date,
+      expected_if_positive: thesis.expected_if_positive,
+      expected_if_negative: thesis.expected_if_negative,
+      entry_level: thesis.entry_level,
+      target_level: thesis.target_level,
+      stop_loss: thesis.stop_loss,
     },
   })
+}
+
+function computeEV(thesis: OpenThesis): number | null {
+  if (thesis.probability_positive_pct == null) return null
+  const prob = thesis.probability_positive_pct / 100
+  // Try to extract percentage from expected_if_positive/negative
+  const upMatch = thesis.expected_if_positive?.match(/([+-]?\d+(?:[.,]\d+)?)\s*%/)
+  const downMatch = thesis.expected_if_negative?.match(/([+-]?\d+(?:[.,]\d+)?)\s*%/)
+  if (!upMatch || !downMatch) return null
+  const up = parseFloat(upMatch[1].replace(',', '.'))
+  const down = parseFloat(downMatch[1].replace(',', '.'))
+  // down is typically negative, but might be written as positive with - prefix
+  const downVal = down > 0 ? -down : down
+  return prob * up + (1 - prob) * downVal
 }
 
 function switchToResolved() {
@@ -220,21 +415,30 @@ watch(
     if (refined && chatStore.thesisReviewContext) {
       const id = chatStore.thesisReviewContext.thesisId
       const updated = await ampelStore.updateThesis(id, {
+        title: refined.title as string,
         statement: refined.statement as string,
+        conditions: refined.conditions as string,
         catalyst: refined.catalyst as string,
         catalyst_date: refined.catalyst_date as string,
         expected_if_positive: refined.expected_if_positive as string,
         expected_if_negative: refined.expected_if_negative as string,
+        entry_level: refined.entry_level as string,
+        target_level: refined.target_level as string,
+        stop_loss: refined.stop_loss as string,
       })
       if (updated) {
-        // Update review context with new data
         chatStore.thesisReviewContext.statement = updated.statement
         chatStore.thesisReviewContext.thesis = {
+          title: updated.title,
           statement: updated.statement,
-          catalyst: updated.catalyst || '',
-          catalyst_date: updated.catalyst_date || '',
-          expected_if_positive: updated.expected_if_positive || '',
-          expected_if_negative: updated.expected_if_negative || '',
+          conditions: updated.conditions,
+          catalyst: updated.catalyst,
+          catalyst_date: updated.catalyst_date,
+          expected_if_positive: updated.expected_if_positive,
+          expected_if_negative: updated.expected_if_negative,
+          entry_level: updated.entry_level,
+          target_level: updated.target_level,
+          stop_loss: updated.stop_loss,
         }
       }
       chatStore.refinedThesis = null
@@ -257,6 +461,7 @@ const probClass = (pct: number): string => {
 
 const loadData = () => {
   ampelStore.fetchTheses()
+  ampelStore.fetchPositions()
 }
 
 onMounted(() => {
@@ -353,13 +558,23 @@ onMounted(() => {
   align-items: flex-start;
 }
 
+.thesis-header-text {
+  flex: 1;
+}
+
+.thesis-title {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--p-text-color);
+  margin: 0 0 0.25rem 0;
+}
+
 .thesis-statement {
   font-size: 0.9375rem;
   font-weight: 500;
   line-height: 1.5;
   color: var(--p-text-color);
   margin: 0;
-  flex: 1;
 }
 
 .resolved-statement {
@@ -463,6 +678,66 @@ onMounted(() => {
   line-height: 1.6;
   color: var(--p-text-color);
   margin: 0;
+}
+
+// Conditions
+.conditions-box {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: var(--p-surface-ground);
+  font-size: 0.8125rem;
+}
+
+.conditions-label {
+  font-weight: 600;
+  color: var(--p-text-color-secondary);
+}
+
+.conditions-text {
+  color: var(--p-text-color-secondary);
+}
+
+// Levels & EV
+.levels-row {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+}
+
+.level-item {
+  color: var(--p-text-color);
+}
+
+.level-label {
+  font-weight: 600;
+  color: var(--p-text-color-secondary);
+}
+
+.level-stop {
+  color: #dc2626;
+  :root.dark & { color: #fca5a5; }
+}
+
+.ev-badge {
+  font-weight: 700;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+
+  &.ev-positive {
+    background-color: rgba(16, 185, 129, 0.1);
+    color: #059669;
+    :root.dark & { background-color: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
+  }
+
+  &.ev-negative {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #dc2626;
+    :root.dark & { background-color: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+  }
 }
 
 // Catalyst
@@ -624,6 +899,129 @@ onMounted(() => {
   gap: 0.25rem;
 
   i { font-size: 0.625rem; }
+}
+
+// Positions
+.position-box {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background-color: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  :root.dark & { background-color: rgba(99, 102, 241, 0.08); border-color: rgba(99, 102, 241, 0.2); }
+}
+
+.position-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.375rem;
+
+  i { font-size: 0.875rem; color: #6366f1; :root.dark & { color: #a5b4fc; } }
+}
+
+.position-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #6366f1;
+  :root.dark & { color: #a5b4fc; }
+}
+
+.position-close-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.125rem 0.25rem;
+  border-radius: 4px;
+  color: var(--p-text-color-secondary);
+  opacity: 0;
+  transition: all 0.15s;
+  font-size: 0.75rem;
+
+  .position-box:hover & { opacity: 0.5; }
+  &:hover { opacity: 1 !important; color: #ef4444; }
+}
+
+.position-details {
+  font-size: 0.8125rem;
+  color: var(--p-text-color);
+  display: flex;
+  gap: 0.375rem;
+
+  strong { font-weight: 700; }
+}
+
+.position-crv {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.crv-item {
+  color: var(--p-text-color-secondary);
+}
+
+.crv-down {
+  color: #dc2626;
+  :root.dark & { color: #fca5a5; }
+}
+
+.crv-positive {
+  color: #059669;
+  :root.dark & { color: #6ee7b7; }
+}
+
+.crv-negative {
+  color: #dc2626;
+  :root.dark & { color: #fca5a5; }
+}
+
+.position-add {
+  display: flex;
+}
+
+.position-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: none;
+  border: 1px dashed var(--p-surface-border);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--p-text-color-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    border-color: #6366f1;
+    color: #6366f1;
+    :root.dark & { border-color: #a5b4fc; color: #a5b4fc; }
+  }
+
+  i { font-size: 0.75rem; }
+}
+
+// Dialog
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+
+  label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--p-text-color-secondary);
+  }
 }
 
 // States

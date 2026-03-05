@@ -79,6 +79,12 @@ createNavigation({
       active: route.path.startsWith('/news'),
     },
     {
+      label: 'Wissen',
+      icon: 'pi pi-sparkles',
+      to: '/suche',
+      active: route.path.startsWith('/suche'),
+    },
+    {
       label: 'Prompt',
       icon: 'pi pi-database',
       to: '/prompt-kontext',

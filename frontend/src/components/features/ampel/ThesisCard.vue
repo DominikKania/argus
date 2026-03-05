@@ -7,24 +7,40 @@
         <i class="pi pi-comments" />
       </button>
     </h3>
+    <p class="thesis-title">{{ thesis.title }}</p>
     <p class="thesis-statement">{{ thesis.statement }}</p>
-    <div v-if="thesis.catalyst" class="catalyst">
+    <div class="conditions-box">
+      <span class="conditions-label">Voraussetzungen:</span>
+      <span class="conditions-text">{{ thesis.conditions }}</span>
+    </div>
+    <div class="catalyst">
       <span class="catalyst-label">Katalysator:</span>
       <span class="catalyst-text">{{ thesis.catalyst }}</span>
-      <span v-if="thesis.catalyst_date" class="catalyst-date">
+      <span class="catalyst-date">
         <i class="pi pi-calendar" />
         {{ thesis.catalyst_date }}
       </span>
     </div>
     <div class="scenarios">
-      <div v-if="thesis.expected_if_positive" class="scenario scenario-positive">
+      <div class="scenario scenario-positive">
         <span class="scenario-icon">+</span>
         <p class="scenario-text">{{ thesis.expected_if_positive }}</p>
       </div>
-      <div v-if="thesis.expected_if_negative" class="scenario scenario-negative">
+      <div class="scenario scenario-negative">
         <span class="scenario-icon">-</span>
         <p class="scenario-text">{{ thesis.expected_if_negative }}</p>
       </div>
+    </div>
+    <div class="levels-row">
+      <span class="level-item">
+        <span class="level-label">Einstieg:</span> {{ thesis.entry_level }}
+      </span>
+      <span class="level-item">
+        <span class="level-label">Ziel:</span> {{ thesis.target_level }}
+      </span>
+      <span class="level-item level-stop">
+        <span class="level-label">Stop:</span> {{ thesis.stop_loss }}
+      </span>
     </div>
   </div>
 </template>
@@ -84,12 +100,63 @@ function askAbout() {
   &:hover { opacity: 1 !important; color: var(--p-primary-500); background: var(--p-surface-ground); }
 }
 
+.thesis-title {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--p-text-color);
+  margin: 0 0 0.25rem 0;
+}
+
 .thesis-statement {
   font-size: 0.9375rem;
   font-weight: 500;
   line-height: 1.5;
   color: var(--p-text-color);
   margin: 0 0 1rem 0;
+}
+
+.conditions-box {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: var(--p-surface-ground);
+  font-size: 0.8125rem;
+}
+
+.conditions-label {
+  font-weight: 600;
+  color: var(--p-text-color-secondary);
+}
+
+.conditions-text {
+  color: var(--p-text-color-secondary);
+}
+
+.levels-row {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--p-surface-border);
+  font-size: 0.8125rem;
+}
+
+.level-item {
+  color: var(--p-text-color);
+}
+
+.level-label {
+  font-weight: 600;
+  color: var(--p-text-color-secondary);
+}
+
+.level-stop {
+  color: #dc2626;
+  :root.dark & { color: #fca5a5; }
 }
 
 .catalyst {

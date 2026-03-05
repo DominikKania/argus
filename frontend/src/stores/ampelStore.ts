@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Analysis, OpenThesis } from '@/types/ampel'
+import type { Analysis, OpenThesis, Position } from '@/types/ampel'
 import { API_ENDPOINTS } from '@/config/apiEndpoints'
 import { ApiService } from '@/services/apiService'
 
@@ -9,6 +9,7 @@ export const useAmpelStore = defineStore('ampel', () => {
   const history = ref<Analysis[]>([])
   const theses = ref<OpenThesis[]>([])
   const resolvedTheses = ref<OpenThesis[]>([])
+  const positions = ref<Position[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -80,6 +81,58 @@ export const useAmpelStore = defineStore('ampel', () => {
     }
   }
 
+  async function fetchPositions() {
+    try {
+      positions.value = await ApiService.get<Position[]>(API_ENDPOINTS.AMPEL.POSITIONS)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  async function createPosition(data: {
+    ticker?: string
+    entry_price: number
+    entry_date: string
+    quantity?: number
+    thesis_id?: string
+    notes?: string
+  }): Promise<Position | null> {
+    try {
+      const pos = await ApiService.post<Position>(API_ENDPOINTS.AMPEL.CREATE_POSITION, data)
+      positions.value.unshift(pos)
+      return pos
+    } catch (err) {
+      console.error(err)
+      return null
+    }
+  }
+
+  async function closePosition(
+    id: string,
+    data: { exit_price: number; exit_date: string; notes?: string },
+  ): Promise<Position | null> {
+    try {
+      const pos = await ApiService.put<Position>(API_ENDPOINTS.AMPEL.CLOSE_POSITION(id), data)
+      const idx = positions.value.findIndex((p) => p._id === id)
+      if (idx >= 0) positions.value.splice(idx, 1)
+      return pos
+    } catch (err) {
+      console.error(err)
+      return null
+    }
+  }
+
+  async function deletePosition(id: string): Promise<boolean> {
+    try {
+      await ApiService.delete(API_ENDPOINTS.AMPEL.DELETE_POSITION(id))
+      positions.value = positions.value.filter((p) => p._id !== id)
+      return true
+    } catch (err) {
+      console.error(err)
+      return false
+    }
+  }
+
   async function updateThesis(id: string, data: Partial<OpenThesis>): Promise<OpenThesis | null> {
     try {
       const updated = await ApiService.put<OpenThesis>(API_ENDPOINTS.AMPEL.UPDATE_THESIS(id), data)
@@ -113,6 +166,7 @@ export const useAmpelStore = defineStore('ampel', () => {
     history,
     theses,
     resolvedTheses,
+    positions,
     loading,
     error,
     fetchLatest,
@@ -122,5 +176,9 @@ export const useAmpelStore = defineStore('ampel', () => {
     fetchDashboard,
     updateThesis,
     refineThesis,
+    fetchPositions,
+    createPosition,
+    closePosition,
+    deletePosition,
   }
 })

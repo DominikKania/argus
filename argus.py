@@ -5,6 +5,7 @@ import argparse
 import io
 import json
 import os
+import re
 import sys
 from datetime import datetime
 
@@ -81,6 +82,8 @@ def ensure_indexes(db):
     db.news_topics.create_index([("active", ASCENDING)])
     db.news_results.create_index([("topic", ASCENDING), ("date", ASCENDING)], unique=True)
     db.news_results.create_index([("date", ASCENDING)])
+    db.positions.create_index([("status", ASCENDING)])
+    db.positions.create_index([("thesis_id", ASCENDING)])
 
     # IWDA.AS als Default-Eintrag
     db.watchlist.update_one(
@@ -215,6 +218,14 @@ def validate_analysis(data):
     return errors
 
 
+def _extract_price(text):
+    """Extract first number from a price string like 'IWDA 118€' → 118.0."""
+    if not text:
+        return None
+    m = re.search(r"(\d+[.,]?\d*)", text)
+    return float(m.group(1).replace(",", ".")) if m else None
+
+
 # ── Befehle ─────────────────────────────────────────────────────────────────
 
 def save_analysis(db, data):
@@ -246,6 +257,16 @@ def save_analysis(db, data):
         )
         if update_result.modified_count:
             print(f"These aufgelöst: {tid[:12]}... — {resolution_text[:60]}")
+            # Update ChromaDB: thesis status + index lesson if available
+            try:
+                from backend.embeddings import index_thesis, index_lesson
+                resolved_doc = db.theses.find_one({"_id": oid})
+                if resolved_doc:
+                    index_thesis(tid, resolved_doc)
+                    if resolved_doc.get("lessons_learned"):
+                        index_lesson(tid, resolved_doc)
+            except Exception:
+                pass
 
     # Wahrscheinlichkeits-Updates auf bestehende Thesen anwenden
     prob_updates = data.pop("thesis_probability_updates", None) or []
@@ -273,27 +294,72 @@ def save_analysis(db, data):
     analysis_id = result.inserted_id
     print(f"Analyse gespeichert: {data['date']} | {OVERALL_DISPLAY.get(data['rating']['overall'], data['rating']['overall'])}")
 
+    # Index analysis in ChromaDB for semantic search
+    try:
+        from backend.embeddings import index_analysis
+        index_analysis(str(analysis_id), data)
+    except Exception as e:
+        print(f"Embedding-Index fehlgeschlagen (Analyse): {e}")
+
     # Neue These automatisch anlegen wenn vorhanden
     thesis_data = data.get("thesis")
     if thesis_data and thesis_data.get("statement"):
-        thesis_doc = {
-            "created_date": data["date"],
-            "analysis_id": analysis_id,
-            "statement": thesis_data["statement"],
-            "catalyst": thesis_data.get("catalyst"),
-            "catalyst_date": thesis_data.get("catalyst_date"),
-            "expected_if_positive": thesis_data.get("expected_if_positive"),
-            "expected_if_negative": thesis_data.get("expected_if_negative"),
-            "probability_positive_pct": thesis_data.get("probability_positive_pct"),
-            "probability_reasoning": thesis_data.get("probability_reasoning"),
-            "status": "open",
-            "resolution": None,
-            "resolution_date": None,
-            "accuracy": None,
-            "lessons_learned": None,
-        }
-        db.theses.insert_one(thesis_doc)
-        print(f"These angelegt: {thesis_data['statement'][:60]}...")
+        # Duplikat-Check: semantisch via ChromaDB + Preis-Vergleich
+        is_duplicate = False
+        try:
+            from backend.embeddings import check_thesis_duplicate
+            dup = check_thesis_duplicate(thesis_data)
+            if dup:
+                print(f"These übersprungen (semantisches Duplikat, Distanz {dup['distance']:.3f}): "
+                      f"{dup['metadata'].get('created_date', '?')}")
+                is_duplicate = True
+        except Exception:
+            pass
+
+        if not is_duplicate:
+            # Fallback: Preis-basierter Duplikat-Check
+            open_theses = list(db.theses.find({"status": "open"}))
+            new_target = _extract_price(thesis_data.get("target_level", ""))
+            new_stop = _extract_price(thesis_data.get("stop_loss", ""))
+            for existing in open_theses:
+                ex_target = _extract_price(existing.get("target_level", ""))
+                ex_stop = _extract_price(existing.get("stop_loss", ""))
+                if (new_target and ex_target and abs(new_target - ex_target) <= 2.0
+                        and new_stop and ex_stop and abs(new_stop - ex_stop) <= 2.0):
+                    print(f"These übersprungen (Preis-Duplikat von '{existing.get('title', existing['statement'][:40])}'): "
+                          f"gleiches Ziel ~{new_target}€ / Stop ~{new_stop}€")
+                    is_duplicate = True
+                    break
+
+        if not is_duplicate:
+            thesis_doc = {
+                "created_date": data["date"],
+                "analysis_id": analysis_id,
+                "title": thesis_data.get("title"),
+                "statement": thesis_data["statement"],
+                "conditions": thesis_data.get("conditions"),
+                "catalyst": thesis_data.get("catalyst"),
+                "catalyst_date": thesis_data.get("catalyst_date"),
+                "expected_if_positive": thesis_data.get("expected_if_positive"),
+                "expected_if_negative": thesis_data.get("expected_if_negative"),
+                "probability_positive_pct": thesis_data.get("probability_positive_pct"),
+                "probability_reasoning": thesis_data.get("probability_reasoning"),
+                "entry_level": thesis_data.get("entry_level"),
+                "target_level": thesis_data.get("target_level"),
+                "stop_loss": thesis_data.get("stop_loss"),
+                "status": "open",
+                "resolution": None,
+                "resolution_date": None,
+                "accuracy": None,
+                "lessons_learned": None,
+            }
+            result_thesis = db.theses.insert_one(thesis_doc)
+            print(f"These angelegt: {thesis_data['statement'][:60]}...")
+            try:
+                from backend.embeddings import index_thesis
+                index_thesis(str(result_thesis.inserted_id), thesis_doc)
+            except Exception as e:
+                print(f"Embedding-Index fehlgeschlagen (These): {e}")
 
 
 def cmd_save(args):

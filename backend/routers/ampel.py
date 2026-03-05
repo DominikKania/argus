@@ -33,6 +33,7 @@ from ampel_auto import (
 )
 from backend.prompt_builder import (
     build_news_context,
+    build_positions_context,
     build_trend_analyst_prompt,
     build_volatility_analyst_prompt,
     build_macro_analyst_prompt,
@@ -48,12 +49,32 @@ router = APIRouter()
 # ── Models ────────────────────────────────────────────────────────────────
 
 class UpdateThesisRequest(BaseModel):
+    title: Optional[str] = None
     statement: Optional[str] = None
+    conditions: Optional[str] = None
     catalyst: Optional[str] = None
     catalyst_date: Optional[str] = None
     expected_if_positive: Optional[str] = None
     expected_if_negative: Optional[str] = None
+    entry_level: Optional[str] = None
+    target_level: Optional[str] = None
+    stop_loss: Optional[str] = None
     lessons_learned: Optional[str] = None
+
+
+class CreatePositionRequest(BaseModel):
+    ticker: str = "IWDA.AS"
+    entry_price: float
+    entry_date: str
+    quantity: Optional[float] = None
+    thesis_id: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ClosePositionRequest(BaseModel):
+    exit_price: float
+    exit_date: str
+    notes: Optional[str] = None
 
 
 class ExtractLessonsRequest(BaseModel):
@@ -95,13 +116,23 @@ Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6
 ## REGELN
 - Antworte NUR mit einem JSON-Objekt (kein Markdown, kein Text drumherum)
 - Das JSON hat exakt diese Felder:
+  - "title": 3-5 Wörter knackige Überschrift (z.B. "Tech-Earnings als Wendepunkt")
   - "statement": Die Kernaussage der These
-  - "catalyst": Was genau muss passieren?
+  - "conditions": Passive Rahmenbedingungen die gelten müssen (z.B. "VIX < 22 (normale Volatilität)"). KEIN Trigger!
+  - "catalyst": Der EINE auslösende Trigger — ein konkretes EREIGNIS (z.B. "Starke NVIDIA-Earnings"). KEIN Nicht-Ereignis ("keine Eskalation")!
   - "catalyst_date": Datum im Format YYYY-MM-DD — max. 4-6 Wochen in der Zukunft!
-  - "expected_if_positive": Was passiert f\u00fcr mein Portfolio wenn die These eintritt?
-  - "expected_if_negative": Was passiert f\u00fcr mein Portfolio wenn die These nicht eintritt?
-- WICHTIG: Zeithorizont max. 4-6 Wochen!
-- Alle Daten m\u00fcssen im aktuellen Jahr ({year}) oder sp\u00e4ter liegen!"""
+  - "expected_if_positive": +X% weil... (konkretes Kursziel in EUR für IWDA)
+  - "expected_if_negative": -X% weil... (konkretes Abwärtsrisiko in EUR für IWDA)
+  - "entry_level": Konkretes Einstiegsniveau in EUR (z.B. "Bei IWDA unter 112€")
+  - "target_level": Konkretes Kursziel in EUR (z.B. "IWDA 118€ = +5%")
+  - "stop_loss": Konkretes Ausstiegsniveau bei Verlust (z.B. "Wochenschluss unter 111€")
+- BEDINGUNGEN ≠ KATALYSATOREN! conditions = passive Zustände, catalyst = aktives Ereignis
+- VIX-Schwellen IMMER begründen (z.B. "VIX < 20 = historisch normal, > 26 = oberes Quartil")
+- Expected Value BERECHNEN: EV = (Prob × Upside) + ((1-Prob) × Downside)
+- ENTRY_LEVEL IST DIE BERECHNUNGSBASIS! Alle %-Angaben (Upside, Downside, EV) werden AB entry_level gerechnet. Bei anderem Kaufkurs wird die Rechnung ungültig.
+- STOP-LOSS vs. NEGATIVES SZENARIO: Der stop_loss BEGRENZT den maximalen Verlust. expected_if_negative MUSS den Stop-Loss als Untergrenze verwenden. EV-Berechnung verwendet Downside ab Stop-Loss, nicht ein tieferes Kursziel.
+- WICHTIG: Zeithorizont max. 4-6 Wochen! RECHNE die Tage aus: Von heute bis catalyst_date = X Tage. Muss 14-42 Tage sein.
+- Alle Daten müssen im aktuellen Jahr ({year}) oder später liegen!"""
 
 
 def _sanitize_floats(obj):
@@ -125,6 +156,8 @@ def _serialize_doc(doc):
     doc["_id"] = str(doc["_id"])
     if "analysis_id" in doc:
         doc["analysis_id"] = str(doc["analysis_id"])
+    if "thesis_id" in doc and doc["thesis_id"] is not None:
+        doc["thesis_id"] = str(doc["thesis_id"])
     return _sanitize_floats(doc)
 
 
@@ -174,6 +207,7 @@ def get_prompts():
         {"status": "resolved", "lessons_learned": {"$ne": None}},
         {"statement": 1, "lessons_learned": 1},
     ))
+    positions = list(db.positions.find({"status": "open"}))
 
     return {
         "stages": {
@@ -197,7 +231,7 @@ def get_prompts():
                 "system": SYNTHESIS_PROMPT,
                 "user": build_synthesis_prompt(
                     market, signals, score, {},
-                    history, theses, researches, news_results, lessons,
+                    history, theses, researches, news_results, lessons, positions,
                 ),
             },
         },
@@ -288,12 +322,13 @@ def run_ampel_analysis():
                 {"status": "resolved", "lessons_learned": {"$ne": None}},
                 {"statement": 1, "lessons_learned": 1},
             ))
+            positions = list(db.positions.find({"status": "open"}))
 
             # 5. Stage 2: Synthese (streamed)
             yield _sse_event("status", "Stage 2: Synthese...")
             synthesis_user = build_synthesis_prompt(
                 market, mech_signals, mech_score, stage1_results,
-                history, theses, researches, news_results, lessons,
+                history, theses, researches, news_results, lessons, positions,
             )
             yield _sse_event("prompt", {"system": SYNTHESIS_PROMPT, "user": synthesis_user})
 
@@ -559,3 +594,484 @@ def refine_thesis(req: RefineThesisRequest):
     except Exception as e:
         log.error("Thesis-Verfeinerung fehlgeschlagen: %s", e)
         raise HTTPException(status_code=500, detail="Thesis-Verfeinerung fehlgeschlagen.")
+
+
+# ── Positions ────────────────────────────────────────────────────────────
+
+@router.get("/positions")
+def get_positions(status: str = "open"):
+    """Get portfolio positions, optionally filtered by status."""
+    db = get_db()
+    query = {"status": status} if status != "all" else {}
+    cursor = db.positions.find(query).sort("entry_date", -1)
+    return [_serialize_doc(doc) for doc in cursor]
+
+
+@router.post("/positions")
+def create_position(req: CreatePositionRequest):
+    """Open a new portfolio position."""
+    db = get_db()
+    doc = {
+        "ticker": req.ticker,
+        "entry_price": req.entry_price,
+        "entry_date": req.entry_date,
+        "quantity": req.quantity,
+        "thesis_id": ObjectId(req.thesis_id) if req.thesis_id else None,
+        "status": "open",
+        "exit_price": None,
+        "exit_date": None,
+        "notes": req.notes or "",
+    }
+    result = db.positions.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return _serialize_doc(doc)
+
+
+@router.put("/positions/{position_id}/close")
+def close_position(position_id: str, req: ClosePositionRequest):
+    """Close an open position with exit price and date."""
+    db = get_db()
+    try:
+        oid = ObjectId(position_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Ungültige Position-ID.")
+
+    doc = db.positions.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Position nicht gefunden.")
+    if doc["status"] == "closed":
+        raise HTTPException(status_code=400, detail="Position ist bereits geschlossen.")
+
+    update = {
+        "status": "closed",
+        "exit_price": req.exit_price,
+        "exit_date": req.exit_date,
+    }
+    if req.notes:
+        update["notes"] = req.notes
+
+    db.positions.update_one({"_id": oid}, {"$set": update})
+    updated = db.positions.find_one({"_id": oid})
+    return _serialize_doc(updated)
+
+
+@router.post("/embeddings/reindex")
+def reindex_embeddings():
+    """Reindex all existing data into ChromaDB for semantic search."""
+    try:
+        from backend.embeddings import reindex_all
+        db = get_db()
+        counts = reindex_all(db)
+        return {"status": "ok", "counts": counts}
+    except Exception as e:
+        log.error("Reindex fehlgeschlagen: %s", e)
+        raise HTTPException(status_code=500, detail=f"Reindex fehlgeschlagen: {e}")
+
+
+@router.get("/embeddings/search")
+def search_embeddings(q: str, collection: str = "theses", n: int = 5):
+    """Semantic search across ChromaDB collections."""
+    try:
+        from backend.embeddings import (
+            find_similar_theses, find_similar_analyses,
+            find_relevant_lessons, find_similar_news,
+            find_similar_research,
+        )
+        search_fn = {
+            "theses": find_similar_theses,
+            "analyses": find_similar_analyses,
+            "lessons": find_relevant_lessons,
+            "news": find_similar_news,
+            "research": find_similar_research,
+        }.get(collection)
+        if not search_fn:
+            raise HTTPException(status_code=400, detail=f"Unbekannte Collection: {collection}")
+        return search_fn(q, n=n)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/embeddings/search-all")
+def search_all_embeddings(q: str, n: int = 3):
+    """Semantic search across ALL ChromaDB collections at once."""
+    try:
+        from backend.embeddings import (
+            find_similar_theses, find_similar_analyses,
+            find_relevant_lessons, find_similar_news,
+            find_similar_research,
+        )
+        results = {}
+        for name, fn in [
+            ("theses", find_similar_theses),
+            ("analyses", find_similar_analyses),
+            ("lessons", find_relevant_lessons),
+            ("news", find_similar_news),
+            ("research", find_similar_research),
+        ]:
+            try:
+                results[name] = fn(q, n=n)
+            except Exception:
+                results[name] = []
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+KNOWLEDGE_SYSTEM_PROMPT = """\
+Du bist der Argus Wissensassistent. Der Benutzer stellt eine Frage zu seinem Investment-Portfolio \
+(MSCI World ETF, IWDA). Du beantwortest die Frage basierend auf ALLEN bereitgestellten Daten aus \
+dem Argus-System.
+
+## HEUTIGES DATUM
+{today}
+
+## REGELN
+- Beantworte die Frage DIREKT und KONKRET in 2-4 Absätzen
+- Begründe deine Antwort mit konkreten Zahlen und Daten aus dem Kontext
+- Beziehe ALLE relevanten Datenquellen ein: Analyse, Research-Studien, News, Thesen, Kursdaten, Positionen
+- Nenne die Datenquelle wenn du dich darauf beziehst (z.B. "Laut Research 'Trump-Politik'...", "Die Analyse vom 05.03. zeigt...", "Die News berichten...")
+- Verknüpfe Erkenntnisse aus verschiedenen Quellen miteinander — das ist der Hauptwert dieser Funktion
+- Sei ehrlich wenn die Daten keine klare Antwort hergeben
+- Antworte auf Deutsch
+- Du gibst KEINE Anlageberatung, sondern ordnest die Daten ein und erklärst Zusammenhänge
+
+## ALLE VERFÜGBAREN DATEN
+{context}"""
+
+
+class KnowledgeRequest(BaseModel):
+    question: str
+
+
+def _build_knowledge_context(db, question: str) -> tuple[str, dict]:
+    """Build FULL context from all data sources + semantic search.
+
+    Returns (context_text, semantic_sources).
+    """
+    parts = []
+
+    # ── 1. Aktuelle Analyse (Signale, Rating, Empfehlung) ──────────────
+    analysis = db.analyses.find_one(sort=[("date", -1)])
+    if analysis:
+        rat = analysis.get("rating", {})
+        rec = analysis.get("recommendation", {})
+        sig = analysis.get("signals", {})
+        parts.append("## AKTUELLE ANALYSE ({})".format(analysis.get("date", "?")))
+        parts.append("Rating: {} (Score {}/4)".format(rat.get("overall", "?"), rat.get("mechanical_score", "?")))
+        parts.append("Begründung: {}".format(rat.get("reasoning", "?")))
+        parts.append("Empfehlung: {} — {}".format(rec.get("action", "?"), rec.get("detail", "?")))
+
+        for name in ["trend", "volatility", "macro", "sentiment"]:
+            s = sig.get(name, {})
+            parts.append("- {}: mechanisch={}, kontext={}".format(name, s.get("mechanical"), s.get("context")))
+            parts.append("  {}".format(s.get("note", "")))
+
+        if analysis.get("escalation_trigger"):
+            parts.append("Escalation Trigger: {}".format(analysis["escalation_trigger"]))
+        if analysis.get("historical_comparison"):
+            parts.append("\nHistorischer Vergleich: {}".format(analysis["historical_comparison"]))
+
+        # ── Marktdaten aus Analyse ──
+        m = analysis.get("market", {})
+        if m:
+            parts.append("\n## MARKTDATEN")
+            parts.append("IWDA Kurs: {:.2f}€ | SMA50: {:.2f}€ | SMA200: {:.2f}€".format(
+                m.get("price", 0), m.get("sma50", 0), m.get("sma200", 0)))
+            parts.append("Puffer SMA50: {:.1f}% | ATH-Delta: {:.1f}% | Golden Cross: {}".format(
+                m.get("puffer_sma50_pct", 0), m.get("delta_ath_pct", 0), m.get("golden_cross", "?")))
+
+            vix = m.get("vix", {})
+            if vix:
+                parts.append("VIX: {:.1f} ({}) | Vorwoche: {:.1f}".format(
+                    vix.get("value", 0), vix.get("direction", "?"), vix.get("prev_week", 0)))
+
+            yields = m.get("yields", {})
+            if yields:
+                parts.append("US10Y: {:.2f}% | US2Y: {:.2f}% | Spread: {:.2f}% | Real Yield: {:.2f}%".format(
+                    yields.get("us10y", 0), yields.get("us2y", 0),
+                    yields.get("spread", 0), yields.get("real_yield", 0)))
+
+            cs = m.get("credit_spread", {})
+            if cs:
+                parts.append("Credit Spread Proxy: {:.2f}pp ({})".format(
+                    cs.get("spread_proxy", 0), cs.get("direction", "?")))
+
+            if m.get("put_call"):
+                parts.append("Put/Call Ratio: {}".format(m["put_call"]))
+
+            oil = m.get("oil", {})
+            if isinstance(oil, dict) and oil.get("price"):
+                parts.append("Öl: {:.2f}$ ({}, 1M: {:+.1f}%)".format(
+                    oil["price"], oil.get("direction", "?"), oil.get("change_1m_pct", 0)))
+            elif isinstance(oil, (int, float)):
+                parts.append("Öl: {:.2f}$".format(oil))
+
+            gold = m.get("gold", {})
+            if isinstance(gold, dict) and gold.get("price"):
+                parts.append("Gold: {:.2f}$ ({}, 1M: {:+.1f}%)".format(
+                    gold["price"], gold.get("direction", "?"), gold.get("change_1m_pct", 0)))
+            elif isinstance(gold, (int, float)):
+                parts.append("Gold: {:.2f}$".format(gold))
+
+            eurusd = m.get("eurusd", {})
+            if isinstance(eurusd, dict) and eurusd.get("rate"):
+                parts.append("EUR/USD: {:.4f} ({})".format(eurusd["rate"], eurusd.get("direction", "?")))
+
+            dxy = m.get("dxy", {})
+            if isinstance(dxy, dict) and dxy.get("value"):
+                parts.append("DXY: {:.2f} ({})".format(dxy["value"], dxy.get("direction", "?")))
+
+            regional = m.get("regional", {})
+            if isinstance(regional, dict):
+                parts.append("Regional: USA 1M {:+.2f}% | Europa 1M {:+.2f}% | USA vs EU: {:+.2f}pp".format(
+                    regional.get("spy_perf_1m", 0), regional.get("ezu_perf_1m", 0),
+                    regional.get("usa_vs_europe", 0)))
+
+            season = m.get("seasonality", {})
+            if isinstance(season, dict) and season.get("seasonal_bias"):
+                parts.append("Saisonalität: {} (Ø Monatsrendite: {:.2f}%)".format(
+                    season.get("seasonal_bias", "?"), season.get("avg_return_pct", 0)))
+
+            # ── Earnings ──
+            earn = m.get("earnings", {})
+            if earn:
+                parts.append("\n## EARNINGS")
+                parts.append("Beat Rate: {} ({:.0f}%) | Ø Surprise: {:.1f}%".format(
+                    earn.get("beat_rate", "?"), earn.get("beat_rate_pct", 0),
+                    earn.get("avg_surprise_pct", 0)))
+                parts.append("Fwd EPS Growth: {:.1f}% | Revisionen 7d: {} | 30d: {} ({})".format(
+                    (earn.get("fwd_eps_growth_0y", 0) or 0) * 100,
+                    earn.get("net_revisions_7d", "?"), earn.get("net_revisions_30d", "?"),
+                    earn.get("revision_direction", "?")))
+                by_sector = earn.get("by_sector", {})
+                if by_sector:
+                    parts.append("Nach Sektor:")
+                    for sector, sd in list(by_sector.items())[:6]:
+                        parts.append("  {}: Beat {}, Surprise {:.1f}%".format(
+                            sector, sd.get("beat_rate", "?"), sd.get("avg_surprise_pct", 0)))
+
+            # ── Top Holdings ──
+            th = m.get("top_holdings", {})
+            holdings = th.get("holdings", []) if isinstance(th, dict) else []
+            if holdings:
+                parts.append("\n## TOP HOLDINGS")
+                above = sum(1 for h in holdings if h.get("above_sma50"))
+                parts.append("{} von {} über SMA50".format(above, len(holdings)))
+                for h in holdings[:10]:
+                    parts.append("  {} ({}): {:.2f}$ | SMA50-Puffer: {:.1f}% | 1M: {:.1f}%".format(
+                        h.get("ticker", "?"), h.get("sector", "?"),
+                        h.get("price", 0), h.get("puffer_sma50_pct", 0),
+                        h.get("perf_1m_pct", 0)))
+
+            # ── Sektorrotation ──
+            sr = m.get("sector_rotation", {})
+            if sr:
+                parts.append("\n## SEKTORROTATION")
+                for sector, perf in sorted(sr.items(), key=lambda x: x[1] if isinstance(x[1], (int, float)) else 0, reverse=True):
+                    if isinstance(perf, (int, float)):
+                        parts.append("  {}: {:+.2f}pp".format(sector, perf))
+
+        # ── Markt-Kontext Notizen ──
+        mctx = analysis.get("market_context", {})
+        if mctx:
+            ctx_notes = [(k.replace("_note", "").replace("_", " ").title(), v)
+                         for k, v in mctx.items() if v]
+            if ctx_notes:
+                parts.append("\n## MARKT-KONTEXT")
+                for label, note in ctx_notes:
+                    parts.append("- {}: {}".format(label, note))
+
+        # ── Key Levels ──
+        kl = analysis.get("key_levels", {})
+        if kl:
+            parts.append("\n## KEY LEVELS")
+            for k, v in kl.items():
+                parts.append("  {}: {}".format(k, v))
+
+        # ── Sentiment Events ──
+        se = analysis.get("sentiment_events", [])
+        if se:
+            parts.append("\n## SENTIMENT EVENTS")
+            for ev in se[:8]:
+                if isinstance(ev, dict):
+                    parts.append("- [{}] {} (Einfluss: {})".format(
+                        ev.get("date", "?"), ev.get("event", "?"), ev.get("impact", "?")))
+                else:
+                    parts.append("- {}".format(ev))
+
+    # ── 2. Research-Ergebnisse (früh im Kontext für hohe Gewichtung) ──
+    researches = list(db.researches.find(
+        {"status": "completed"},
+        {"_id": 0, "title": 1, "relevance_summary": 1, "results": 1},
+    ))
+    if researches:
+        parts.append("\n## RESEARCH-ERGEBNISSE ({} Studien)".format(len(researches)))
+        for r in researches:
+            parts.append("\n### {}".format(r.get("title", "?")))
+            if r.get("relevance_summary"):
+                parts.append("Kernaussage: {}".format(r["relevance_summary"]))
+            # Include first meaningful chunk of results for detail
+            if r.get("results"):
+                # Skip markdown headers, get substance
+                lines = [l.strip() for l in r["results"].split("\n") if l.strip() and not l.startswith("#")]
+                substance = "\n".join(lines[:15])[:800]
+                if substance:
+                    parts.append("Details: {}".format(substance))
+
+    # ── 3. Offene Positionen ──────────────────────────────────────────
+    positions = list(db.positions.find({"status": "open"}, {"_id": 0}))
+    if positions:
+        parts.append("\n## OFFENE POSITIONEN")
+        for p in positions:
+            parts.append("  {} | Einstieg: {:.2f}€ am {} | Stück: {}".format(
+                p.get("ticker", "?"), p.get("entry_price", 0),
+                p.get("entry_date", "?"), p.get("quantity", "?")))
+            if p.get("notes"):
+                parts.append("  Notiz: {}".format(p["notes"]))
+
+    # ── 3. Offene Thesen ──────────────────────────────────────────────
+    theses = list(db.theses.find({"status": "open"}, {"_id": 0}))
+    if theses:
+        parts.append("\n## OFFENE THESEN")
+        for i, t in enumerate(theses, 1):
+            parts.append("\n### These {}".format(i))
+            parts.append("Statement: {}".format(t.get("statement", "?")))
+            if t.get("catalyst"):
+                parts.append("Katalysator: {}".format(t["catalyst"]))
+            if t.get("catalyst_date"):
+                parts.append("Katalysator-Datum: {}".format(t["catalyst_date"]))
+            if t.get("expected_if_positive"):
+                parts.append("Wenn positiv: {}".format(t["expected_if_positive"]))
+            if t.get("expected_if_negative"):
+                parts.append("Wenn negativ: {}".format(t["expected_if_negative"]))
+            if t.get("entry_level"):
+                parts.append("Entry Level: {}".format(t["entry_level"]))
+            if t.get("target_level"):
+                parts.append("Ziel: {}".format(t["target_level"]))
+            if t.get("stop_loss"):
+                parts.append("Stop-Loss: {}".format(t["stop_loss"]))
+            if t.get("probability"):
+                parts.append("Wahrscheinlichkeit: {}%".format(t["probability"]))
+
+    # ── 5. Kursdaten (alle Watchlist-Ticker, kompakt) ───────────────
+    tickers = db.prices.distinct("ticker")
+    if tickers:
+        parts.append("\n## KURSDATEN")
+        for ticker in tickers:
+            prices = list(db.prices.find(
+                {"ticker": ticker},
+                {"_id": 0, "date": 1, "close": 1, "sma50": 1, "sma200": 1},
+            ).sort("date", -1).limit(5))
+            if prices:
+                latest = prices[0]
+                oldest = prices[-1]
+                chg = ((latest.get("close", 0) / oldest.get("close", 1)) - 1) * 100 if oldest.get("close") else 0
+                line = "{}: {:.2f}€ ({:+.1f}% 5d)".format(ticker, latest.get("close", 0), chg)
+                if latest.get("sma50"):
+                    puffer = ((latest["close"] / latest["sma50"]) - 1) * 100
+                    line += " | SMA50: {:.2f}€ ({:+.1f}%)".format(latest["sma50"], puffer)
+                parts.append(line)
+
+    # ── 6. News ───────────────────────────────────────────────────────
+    news_results = list(db.news_results.find(
+        {}, {"raw_headlines": 0, "_id": 0},
+    ).sort("date", -1).limit(15))
+    if news_results:
+        parts.append("\n## AKTUELLE NEWS")
+        seen = set()
+        for nr in news_results:
+            topic = nr.get("topic", "")
+            if topic in seen:
+                continue
+            seen.add(topic)
+            parts.append("\n### {} ({}) — Trend: {}".format(
+                topic, nr.get("date", "?"), nr.get("trend", "?")))
+            if nr.get("development"):
+                parts.append("Entwicklung: {}".format(nr["development"]))
+            if nr.get("recurring"):
+                parts.append("Bestätigt: {}".format(nr["recurring"]))
+            if nr.get("summary"):
+                parts.append("Einordnung: {}".format(nr["summary"]))
+            if nr.get("ampel_relevance"):
+                parts.append("Ampel-Relevanz: {}".format(nr["ampel_relevance"]))
+
+    # ── 6. Semantische Suche (ergänzend) ──────────────────────────────
+    sources = {}
+    try:
+        from backend.embeddings import (
+            find_similar_theses, find_similar_analyses,
+            find_relevant_lessons, find_similar_news,
+            find_similar_research,
+        )
+        for label, name, fn, max_n, threshold in [
+            ("SEMANTISCH ÄHNLICHE THESEN", "theses", find_similar_theses, 3, 0.85),
+            ("SEMANTISCH ÄHNLICHE ANALYSEN", "analyses", find_similar_analyses, 3, 0.85),
+            ("RELEVANTE ERKENNTNISSE", "lessons", find_relevant_lessons, 3, 0.85),
+            ("SEMANTISCH ÄHNLICHE NEWS", "news", find_similar_news, 3, 0.85),
+            ("RELEVANTE RESEARCH-STUDIEN", "research", find_similar_research, 5, 0.95),
+        ]:
+            try:
+                items = fn(question, n=max_n)
+                relevant = [i for i in items if i.get("distance", 1) < threshold]
+                if relevant:
+                    sources[name] = relevant
+                    parts.append("\n## {}".format(label))
+                    for item in relevant:
+                        meta = item.get("metadata", {})
+                        meta_str = ", ".join("{}: {}".format(k, v) for k, v in (meta or {}).items() if v)
+                        if meta_str:
+                            parts.append("[{}]".format(meta_str))
+                        parts.append(item.get("document", "")[:400])
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    context = "\n".join(parts) if parts else "Keine Daten verfügbar."
+    return context, sources
+
+
+@router.post("/knowledge/ask")
+def knowledge_ask(req: KnowledgeRequest):
+    """Answer a question using ALL available data + semantic search, streamed via SSE."""
+    db = get_db()
+    context, sources = _build_knowledge_context(db, req.question)
+
+    system_prompt = KNOWLEDGE_SYSTEM_PROMPT.format(
+        today=datetime.now().strftime("%Y-%m-%d"),
+        context=context,
+    )
+    messages = [{"role": "user", "content": req.question}]
+
+    def generate():
+        try:
+            sources_event = json.dumps({"type": "sources", "data": sources}, ensure_ascii=False, default=str)
+            yield f"data: {sources_event}\n\n"
+
+            for chunk in stream_llm(system_prompt, messages):
+                escaped = json.dumps(chunk, ensure_ascii=False)
+                yield f"data: {escaped}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            log.error("Knowledge ask failed: %s", e)
+            error_msg = json.dumps({"error": str(e)}, ensure_ascii=False)
+            yield f"data: {error_msg}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@router.delete("/positions/{position_id}")
+def delete_position(position_id: str):
+    """Delete a position."""
+    db = get_db()
+    try:
+        oid = ObjectId(position_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Ungültige Position-ID.")
+
+    result = db.positions.delete_one({"_id": oid})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Position nicht gefunden.")
+    return {"deleted": True}

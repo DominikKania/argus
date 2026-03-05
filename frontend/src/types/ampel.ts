@@ -150,11 +150,16 @@ export interface SentimentEvent {
 }
 
 export interface Thesis {
+  title: string
   statement: string
-  catalyst?: string
-  catalyst_date?: string
-  expected_if_positive?: string
-  expected_if_negative?: string
+  conditions: string
+  catalyst: string
+  catalyst_date: string
+  expected_if_positive: string
+  expected_if_negative: string
+  entry_level: string
+  target_level: string
+  stop_loss: string
 }
 
 export interface StagePrompt {
@@ -207,17 +212,35 @@ export interface Analysis {
   historical_comparison?: string | null
 }
 
+export interface Position {
+  _id: string
+  ticker: string
+  entry_price: number
+  entry_date: string
+  quantity: number | null
+  thesis_id: string | null
+  status: 'open' | 'closed'
+  exit_price: number | null
+  exit_date: string | null
+  notes: string
+}
+
 export interface OpenThesis {
   _id: string
   created_date: string
   analysis_id: string
+  title: string
   statement: string
-  catalyst?: string
-  catalyst_date?: string
-  expected_if_positive?: string
-  expected_if_negative?: string
-  probability_positive_pct?: number | null
-  probability_reasoning?: string | null
+  conditions: string
+  catalyst: string
+  catalyst_date: string
+  expected_if_positive: string
+  expected_if_negative: string
+  probability_positive_pct: number
+  probability_reasoning: string
+  entry_level: string
+  target_level: string
+  stop_loss: string
   status: 'open' | 'resolved'
   resolution?: string
   resolution_date?: string

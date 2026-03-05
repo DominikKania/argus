@@ -10,7 +10,13 @@ export const API_ENDPOINTS = {
     REFINE_THESIS: '/ampel/theses/refine',
     PROMPTS: '/ampel/prompts',
     RUN: '/ampel/run',
+    POSITIONS: '/ampel/positions',
+    CREATE_POSITION: '/ampel/positions',
+    CLOSE_POSITION: (id: string) => `/ampel/positions/${id}/close`,
+    DELETE_POSITION: (id: string) => `/ampel/positions/${id}`,
   },
+  SEARCH: '/ampel/embeddings/search-all',
+  KNOWLEDGE_ASK: '/ampel/knowledge/ask',
   PRICES: {
     WATCHLIST: '/prices/watchlist',
     TICKER: (ticker: string, days = 30) => `/prices/${ticker}?days=${days}`,

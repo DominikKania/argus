@@ -6,6 +6,7 @@ __pycache__/
 analysis_today.json
 logs/
 .env
+chroma_data/
 
 # Frontend
 frontend/node_modules/

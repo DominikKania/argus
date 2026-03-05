@@ -342,10 +342,92 @@ def build_lessons_context(lessons: list) -> list[str]:
     return lines
 
 
+def build_semantic_history_context(market_summary: str, max_results: int = 2) -> list[str]:
+    """Find past analyses with similar market conditions from ChromaDB.
+
+    Gives the LLM real historical data instead of hallucinated comparisons.
+    """
+    try:
+        from backend.embeddings import find_similar_analyses
+        results = find_similar_analyses(market_summary, n=max_results)
+        if not results:
+            return []
+
+        lines = [
+            "",
+            "## ÄHNLICHE VERGANGENE ANALYSEN (aus Argus-Datenbank)",
+            "Nutze diese echten Vergleichspunkte statt erfundene historische Analogien:",
+        ]
+        for r in results:
+            meta = r.get("metadata", {})
+            date = meta.get("date", "?")
+            overall = meta.get("overall", "?")
+            doc = r.get("document", "")
+            distance = r.get("distance", 1.0)
+            if distance < 0.8 and doc:
+                preview = doc[:300] + "..." if len(doc) > 300 else doc
+                lines.append(f"\n### {date} — {overall} (Ähnlichkeit: {1-distance:.0%})")
+                lines.append(preview)
+        return lines if len(lines) > 3 else []
+    except Exception:
+        return []
+
+
+def build_semantic_lessons_context(market_summary: str, max_lessons: int = 3) -> list[str]:
+    """Build lessons context using semantic search instead of loading all.
+
+    Finds lessons most relevant to the current market situation.
+    Falls back gracefully if ChromaDB is not available.
+    """
+    try:
+        from backend.embeddings import find_relevant_lessons
+        results = find_relevant_lessons(market_summary, n=max_lessons)
+        if not results:
+            return []
+
+        lines = [
+            "",
+            "## ERKENNTNISSE AUS FRÜHEREN THESEN (semantisch relevant)",
+            "Diese Regeln wurden als besonders relevant für die aktuelle Situation identifiziert:",
+        ]
+        for r in results:
+            doc = r.get("document", "")
+            distance = r.get("distance", 1.0)
+            if distance < 0.5:  # Only include reasonably relevant lessons
+                lines.append(f"\n- {doc}")
+        return lines if len(lines) > 3 else []
+    except Exception:
+        return []
+
+
+def build_positions_context(positions: list) -> list[str]:
+    """Build open positions context for the synthesis prompt."""
+    if not positions:
+        return []
+
+    lines = [
+        "",
+        "## OFFENE POSITIONEN (echte Trades)",
+        "Diese Positionen wurden tatsächlich eingegangen. Berechne CRV/EV ab dem ECHTEN Einstiegskurs!",
+    ]
+    for p in positions:
+        tid = str(p.get("thesis_id", "")) or "keine"
+        lines.append(
+            f"- {p['ticker']}: Einstieg {p['entry_price']}€ am {p['entry_date']}"
+            f"{' | ' + str(p['quantity']) + ' Stück' if p.get('quantity') else ''}"
+            f" | These: {tid}"
+        )
+    return lines
+
+
 def build_theses_context(theses: list) -> list[str]:
     """Build open theses lines with IDs and full detail for duplicate avoidance and resolution."""
     if not theses:
-        return []
+        return [
+            "",
+            "## OFFENE THESEN",
+            "Keine offenen Thesen vorhanden. Du MUSST eine neue These erstellen (thesis darf NICHT null sein)!",
+        ]
 
     lines = [
         "",
@@ -600,6 +682,7 @@ def build_synthesis_prompt(
     researches: Optional[list] = None,
     news_results: Optional[list] = None,
     lessons: Optional[list] = None,
+    positions: Optional[list] = None,
 ) -> str:
     """Build user prompt for the Synthesis stage.
 
@@ -668,11 +751,26 @@ def build_synthesis_prompt(
             parts = [f"{h['ticker']} ({h.get('puffer_sma50_pct', 0):+.1f}%)" for h in worst]
             lines.append(f"  Schwächste: {', '.join(parts)}")
 
-    # Research, News, History, Theses, Lessons
+    # Research, News, History, Theses, Positions
     lines.extend(build_research_context(researches or []))
     lines.extend(build_news_context(news_results or []))
     lines.extend(build_history_context(history))
     lines.extend(build_theses_context(theses))
-    lines.extend(build_lessons_context(lessons or []))
+    lines.extend(build_positions_context(positions or []))
+
+    # Lessons: semantic retrieval based on current market situation, fallback to all
+    market_summary = (
+        f"IWDA {market['price']}€ Puffer SMA50 {market['puffer_sma50_pct']}% "
+        f"VIX {vix['value']} {vix['direction']} "
+        f"Spread {yld['spread']}% {yld['spread_direction']}"
+    )
+    semantic_lessons = build_semantic_lessons_context(market_summary)
+    if semantic_lessons:
+        lines.extend(semantic_lessons)
+    else:
+        lines.extend(build_lessons_context(lessons or []))
+
+    # Historical comparison: from real Argus data via semantic search
+    lines.extend(build_semantic_history_context(market_summary))
 
     return "\n".join(lines)

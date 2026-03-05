@@ -62,9 +62,58 @@ class ChatResponse(BaseModel):
     response: str
 
 
-def _build_extra_context(db, view: str, ticker: Optional[str]) -> str:
+def _build_semantic_context(user_message: str) -> str:
+    """Build context using semantic search for the user's question."""
+    parts = []
+    try:
+        from backend.embeddings import (
+            find_similar_theses, find_similar_analyses,
+            find_relevant_lessons, find_similar_news,
+        )
+
+        # Find relevant lessons
+        lessons = find_relevant_lessons(user_message, n=2)
+        relevant_lessons = [l for l in lessons if l.get("distance", 1) < 0.6]
+        if relevant_lessons:
+            parts.append("\n## RELEVANTE ERKENNTNISSE (semantisch)")
+            for l in relevant_lessons:
+                parts.append(f"- {l['document']}")
+
+        # Find relevant past analyses
+        analyses = find_similar_analyses(user_message, n=2)
+        relevant_analyses = [a for a in analyses if a.get("distance", 1) < 0.7]
+        if relevant_analyses:
+            parts.append("\n## ÄHNLICHE VERGANGENE ANALYSEN (semantisch)")
+            for a in relevant_analyses:
+                meta = a.get("metadata", {})
+                doc = a.get("document", "")[:300]
+                parts.append(f"\n### {meta.get('date', '?')} — {meta.get('overall', '?')}")
+                parts.append(doc)
+
+        # Find relevant news
+        news = find_similar_news(user_message, n=3)
+        relevant_news = [n for n in news if n.get("distance", 1) < 0.5]
+        if relevant_news:
+            parts.append("\n## RELEVANTE NEWS (semantisch)")
+            for n in relevant_news:
+                meta = n.get("metadata", {})
+                parts.append(f"- [{meta.get('date', '?')}] {n['document'][:200]}")
+
+    except Exception:
+        pass  # Graceful fallback — semantic search is optional
+
+    return "\n".join(parts)
+
+
+def _build_extra_context(db, view: str, ticker: Optional[str], user_message: str = "") -> str:
     """Build full context from all data sources, regardless of current view."""
     parts = []
+
+    # ── Semantic context based on user question ───────────────────────
+    if user_message:
+        semantic = _build_semantic_context(user_message)
+        if semantic:
+            parts.append(semantic)
 
     # ── Offene Thesen (immer) ────────────────────────────────────────
     theses = list(db.theses.find({"status": "open"}, {"_id": 0}))
@@ -196,7 +245,7 @@ def chat(req: ChatRequest):
         analysis_json = "Keine Analyse vorhanden."
 
     view = req.context.view
-    extra_context = _build_extra_context(db, view, req.context.ticker)
+    extra_context = _build_extra_context(db, view, req.context.ticker, req.message)
 
     # Add thesis review context if present
     if req.context.thesis_review:
@@ -262,7 +311,7 @@ def chat_stream(req: ChatRequest):
         analysis_json = "Keine Analyse vorhanden."
 
     view = req.context.view
-    extra_context = _build_extra_context(db, view, req.context.ticker)
+    extra_context = _build_extra_context(db, view, req.context.ticker, req.message)
 
     if req.context.thesis_review:
         extra_context += (

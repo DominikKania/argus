@@ -43,6 +43,12 @@ const routes = [
         meta: { title: 'News' },
       },
       {
+        path: 'suche',
+        name: 'suche',
+        component: () => import('@/views/SearchView.vue'),
+        meta: { title: 'Suche' },
+      },
+      {
         path: 'prompt-kontext',
         name: 'prompt-kontext',
         component: () => import('@/views/PromptKontextView.vue'),

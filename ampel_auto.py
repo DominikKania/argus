@@ -272,13 +272,18 @@ Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
     {"id": "these-id-aus-kontext", "resolution": "EINDEUTIG eingetreten/widerlegt: Was genau ist passiert?"}
   ],
   "thesis": {
-    "statement": "Klarer Satz ohne Fachk\u00fcrzel",
-    "catalyst": "Was genau muss passieren?",
+    "title": "3-5 Wörter: Knackige Überschrift (z.B. 'Tech-Earnings als Wendepunkt', 'Zollpause stützt Rally')",
+    "statement": "Kernaussage: Was genau wird passieren? Klarer Satz ohne Fachkürzel",
+    "conditions": "Welche Rahmenbedingungen müssen GELTEN damit die These relevant ist? (z.B. 'VIX bleibt unter 22 (= normale Volatilität, oberes Quartil wäre >26)', 'Keine neue Nahost-Eskalation'). Das sind PASSIVE Zustände, keine Trigger!",
+    "catalyst": "Der EINE auslösende Trigger — ein konkretes EREIGNIS das eintritt und Kursbewegung erzeugt (z.B. 'Starke NVIDIA-Earnings am 28. Mai', 'Fed signalisiert Zinspause am 18. Juni'). MUSS ein aktives Ereignis sein, KEIN Nicht-Ereignis!",
     "catalyst_date": "YYYY-MM-DD (max 4-6 Wochen in der Zukunft!)",
-    "expected_if_positive": "Was passiert f\u00fcr mein ETF wenn die These eintritt?",
-    "expected_if_negative": "Was passiert f\u00fcr mein ETF wenn die These nicht eintritt?",
+    "expected_if_positive": "+X% weil... (konkretes Kursziel, z.B. 'IWDA auf 118€ (+5%) weil Tech-Sektor 40% Gewicht hat und Earnings-Beats historisch +3-5% bringen')",
+    "expected_if_negative": "-X% weil... (konkretes Abwärtsrisiko, z.B. 'IWDA auf 108€ (-4%) weil Earnings-Miss bei NVIDIA Gesamtmarkt-Sell-Off auslöst')",
     "probability_positive_pct": 60,
-    "probability_reasoning": "1-2 S\u00e4tze: Warum diese Wahrscheinlichkeit? Welche Basisrate/Evidenz?"
+    "probability_reasoning": "Basisrate + Evidenz + KORREKTE EV-Rechnung. SCHRITT FÜR SCHRITT: 1) Upside = +X%, Downside = -Y% (Y ist POSITIV, das Minus kommt in der Formel!). 2) EV = Prob × X + (1-Prob) × (-Y). Beispiel: Prob=55%, Up=+4%, Down=-6% → EV = 0.55×4 + 0.45×(-6) = 2.2 - 2.7 = -0.5%. PRÜFE DEINE RECHNUNG! Bei negativem EV: Begründe warum der Trade trotzdem sinnvoll ist oder setze thesis auf null.",
+    "entry_level": "Konkretes Einstiegsniveau in EUR (z.B. 'Bei IWDA unter 112€'). WICHTIG: Upside ab Einstieg muss > Downside ab Einstieg sein, sonst ist das CRV ungünstig!",
+    "target_level": "Konkretes Kursziel in EUR (z.B. 'IWDA 118€ = +5% in 4 Wochen')",
+    "stop_loss": "Konkretes Ausstiegsniveau bei Verlust in EUR (z.B. 'Wochenschluss unter 111€'). IMMER definieren!"
   },
   "thesis_probability_updates": [
     {"id": "these-id-aus-kontext", "probability_positive_pct": 55, "probability_reasoning": "Kurze Begr\u00fcndung basierend auf neuen Daten"}
@@ -300,15 +305,24 @@ Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
 REGELN:
 - Alle Texte auf Deutsch, verst\u00e4ndlich und ausf\u00fchrlich (nicht nur Stichworte!)
 - Enum-Werte exakt wie angegeben (lowercase f\u00fcr action/level, UPPERCASE f\u00fcr overall)
-- thesis darf null sein wenn keine neue These sinnvoll ist
+- thesis: Wenn KEINE offenen Thesen existieren, MUSS eine neue These erstellt werden (thesis darf dann NICHT null sein!). Wenn bereits offene Thesen existieren, ist null der Normalfall — erstelle nur dann eine neue These wenn sie ein KOMPLETT NEUES Thema abdeckt.
 - thesis: MAXIMALER Zeithorizont 4-6 Wochen! catalyst_date muss 2-6 Wochen in der Zukunft liegen.
-- thesis: Statement, Katalysator und Szenarien m\u00fcssen ohne Vorwissen verst\u00e4ndlich sein
-- thesis: Pr\u00fcfe die OFFENEN THESEN im Kontext. Erstelle NUR eine neue These wenn sie ein KOMPLETT NEUES Thema abdeckt das in KEINER bestehenden These vorkommt. Auch Kombinationen oder Zusammenfassungen bestehender Thesen sind DUPLIKATE! Wenn Nahost UND Z\u00f6lle schon als separate Thesen existieren, ist "Nahost und Z\u00f6lle entscheiden..." ein Duplikat. thesis: null ist der NORMALFALL wenn bereits offene Thesen existieren.
+- thesis: Statement, Katalysator und Szenarien müssen ohne Vorwissen verständlich sein
+- thesis: DUPLIKAT-PRÜFUNG — STRENG! Vor dem Erstellen einer neuen These: Vergleiche mit JEDER offenen These. Wenn eine bestehende These das GLEICHE Kursziel (±2€), den GLEICHEN Stop-Loss (±2€) oder den GLEICHEN Katalysator-Typ hat → DUPLIKAT → thesis = null. Auch Umformulierungen sind Duplikate! "Defensive Stabilität trotz Geopolitik" = "Geopolitik und SMA50-Krieg" wenn beide auf 118€ Ziel und 111,5€ Stop setzen. Erstelle NUR eine neue These wenn sie einen KOMPLETT ANDEREN Trade beschreibt (anderes Kursziel, anderer Zeithorizont, anderer Sektor).
+- thesis: BEDINGUNGEN ≠ KATALYSATOREN! `conditions` = passive Rahmenbedingungen die gelten müssen (VIX-Level, geopolitische Lage, Marktstimmung). `catalyst` = ein aktives EREIGNIS das eintritt (Earnings-Report, Fed-Meeting, Handelsabkommen). Ein Nicht-Ereignis ("keine neuen Zölle", "keine Eskalation") ist IMMER eine Bedingung, NIE ein Katalysator!
+- thesis: VIX-SCHWELLEN BEGRÜNDEN! Bei jeder VIX-Referenz erklären warum dieser Wert: z.B. "VIX < 20 = historisch normale Volatilität", "VIX > 26 = oberes Quartil der letzten 2 Jahre", "VIX > 35 = Panik-Niveau".
+- thesis: EXPECTED VALUE — KORREKT BERECHNEN! Schritt für Schritt: Upside = +X%, Downside = -Y%. EV = Prob × X + (1-Prob) × (-Y). ACHTUNG: Downside ist NEGATIV in der Formel! Beispiel: 55% Prob, +4% Up, -6% Down → 0.55×4 + 0.45×(-6) = 2.2 - 2.7 = -0.5%. PRÜFE DEINE RECHNUNG NOCHMAL! Bei negativem EV: explizit begründen warum der Trade trotzdem sinnvoll ist (Absicherung, Optionalität) oder thesis null setzen.
+- thesis: KONKRETE EUR-KURSE für IWDA bei entry_level, target_level UND stop_loss. Nicht "bei einem Rücksetzer" sondern "bei IWDA unter 112€". stop_loss IMMER definieren!
+- thesis: CRV PRÜFEN! Die Upside ab entry_level zum target_level muss GRÖSSER sein als die Downside ab entry_level zum stop_loss. Wenn der Einstieg nahe am Ziel liegt aber weit vom Stop entfernt, ist das CRV ungünstig → entry_level anpassen oder These verwerfen.
+- thesis: ENTRY_LEVEL IST DIE BERECHNUNGSBASIS! Alle Prozentangaben (Upside, Downside, EV) werden AB ENTRY_LEVEL gerechnet. target_level und stop_loss sind Abstände vom Einstieg. Wenn entry=113,50€, target=118€, stop=111,50€ → Upside = +3,96%, Downside = −1,76%. Bei einem ANDEREN Kaufkurs (z.B. 115€) verschiebt sich alles: Stop wäre −3,0%, Ziel nur +2,6% — die ganze Rechnung wird ungültig. Deshalb: entry_level ist KEINE Nebensache, sondern die Grundlage der These.
+- thesis: STOP-LOSS vs. NEGATIVES SZENARIO! Der stop_loss BEGRENZT den maximalen Verlust. Deshalb MUSS expected_if_negative den Stop-Loss als Untergrenze verwenden, NICHT ein tieferes Kursziel. Wenn der Stop bei 111,5€ liegt, ist der maximale Verlust ~−1,76% ab Einstieg 113,50€ — NICHT −3,3% bis 110€. Die EV-Berechnung MUSS die Downside ab Stop-Loss verwenden. Falsch: "Stop 111,5€ aber negatives Szenario 110€". Richtig: "Stop 111,5€, max. Verlust −1,76% ab Entry, EV rechnet mit −1,76%". Wenn du glaubst dass 110€ realistisch ist, muss der Stop dort liegen — nicht darüber.
+- thesis: ZEITHORIZONT KONSISTENT — RECHNE NACH! catalyst_date muss 2-6 Wochen (14-42 Tage) ab heute liegen. RECHNE die Tage explizit aus: Von [heutiges Datum] bis [catalyst_date] = X Tage. Wenn X < 14 oder X > 42, passe catalyst_date ODER den Textzeithorizont an. Wenn du "4-6 Wochen" im Text schreibst, muss catalyst_date 28-42 Tage in der Zukunft liegen — NICHT 21 Tage. Prüfe: Heutiges Datum steht im Kontext.
+- thesis: KEINE UNBEGRÜNDETEN BEHAUPTUNGEN! Begriffe wie "saisonale Unterstützung", "historisches Muster", "Basisrate" MÜSSEN konkret spezifiziert werden (z.B. "April-Effekt: S&P 500 war in 70% der Jahre seit 2000 im April positiv"). Wenn du keine konkrete Quelle/Statistik nennen kannst, lass den Punkt weg.
 - thesis_resolutions: NUR auflösen wenn die These EINDEUTIG eingetreten oder widerlegt ist! Eine These die "noch läuft", "weiter gilt" oder "noch nicht entschieden" ist, wird NICHT aufgelöst. Konkreter Test: Kannst du klar sagen "Die These ist eingetreten weil X" oder "Die These ist widerlegt weil Y"? Wenn nein → NICHT auflösen. Leeres Array [] ist der Normalfall. Im Zweifel: nicht auflösen.
-- thesis_probability_updates: Aktualisiere die Wahrscheinlichkeit einer These NUR wenn es einen KONKRETEN NEUEN DATENPUNKT gibt der die Einschätzung verändert. Folgewirkungen bereits bekannter Ereignisse (z.B. Markt-Crash als Reaktion auf gestrige Krise) sind KEIN neuer Datenpunkt. Konkreter Test: "Welche NEUE Information rechtfertigt die Änderung?" Wenn die Antwort nur Folgewirkungen beschreibt → Wahrscheinlichkeit NICHT ändern. Beispiel: Iran-Krieg war gestern bekannt → Dow-Crash heute ist Folgewirkung → KEINE Änderung. Neue Iran-Eskalationsstufe (z.B. Nukleardrohung) → JA, das ist ein neuer Datenpunkt. probability_positive_pct = Wahrscheinlichkeit dass das POSITIVE Szenario eintritt (0-100). Leeres Array [] wenn keine offenen Thesen existieren ODER keine neuen Datenpunkte vorliegen.
+- thesis_probability_updates: Aktualisiere die Wahrscheinlichkeit einer These NUR wenn es einen KONKRETEN NEUEN DATENPUNKT gibt der die Einschätzung verändert. Folgewirkungen bereits bekannter Ereignisse (z.B. Markt-Crash als Reaktion auf gestrige Krise) sind KEIN neuer Datenpunkt. Konkreter Test: "Welche NEUE Information rechtfertigt die Änderung?" Wenn die Antwort nur Folgewirkungen beschreibt → Wahrscheinlichkeit NICHT ändern. Beispiel: Iran-Krieg war gestern bekannt → Dow-Crash heute ist Folgewirkung → KEINE Änderung. Neue Iran-Eskalationsstufe (z.B. Nukleardrohung) → JA, das ist ein neuer Datenpunkt. probability_positive_pct = Wahrscheinlichkeit dass das POSITIVE Szenario eintritt (0-100). Leeres Array [] wenn keine offenen Thesen existieren ODER keine neuen Datenpunkte vorliegen. WICHTIG: Wenn die vorherige Wahrscheinlichkeit z.B. 55% war und du auf 60% erhöhst, MUSS ein konkreter neuer Grund benannt werden ("Neu: Fed-Signal vom 3.3. stützt..."). "Die Daten bestätigen..." oder Umformulierungen des gleichen Arguments reichen NICHT — dann bleibt die Wahrscheinlichkeit gleich.
 - probability_positive_pct bei neuen Thesen: IMMER setzen, basierend auf Evidenz. Nicht raten — nutze Basisraten aus Research, Marktdaten, historische Muster.
 - key_levels, risk_assessment, action_triggers: IMMER ausf\u00fcllen, nie null
-- historical_comparison: Nenne immer eine konkrete Vergleichsphase (Monat/Jahr)
+- historical_comparison: Nenne immer eine konkrete Vergleichsphase (Monat/Jahr). PRÜFE ob die Analogie tatsächlich passt! Frage dich: "Was passierte damals TATSÄCHLICH?" Beispiel: Frühjahr 2018 = Beginn US-China-Handelskrieg mit steigender Volatilität — das ist KEIN Beispiel für Marktstabilisierung. Wenn du die Phase nicht genau einordnen kannst, wähle eine andere oder schreibe "kein direkt vergleichbarer Zeitraum".
 - market_context: Jedes Feld 2-3 S\u00e4tze, nur leer lassen wenn wirklich nicht relevant
 """
 
@@ -433,7 +447,8 @@ def run_stage1(market, mech_signals, news_results, researches=None):
 # ── Stage 2: Synthese ────────────────────────────────────────────────────
 
 def run_stage2(market, mech_signals, mech_score, stage1_results,
-               history, theses, researches, news_results, lessons=None, max_retries=1):
+               history, theses, researches, news_results, lessons=None,
+               positions=None, max_retries=1):
     """F\u00fchrt die Synthese-Stufe aus.
 
     Returns:
@@ -441,7 +456,7 @@ def run_stage2(market, mech_signals, mech_score, stage1_results,
     """
     user_prompt = build_synthesis_prompt(
         market, mech_signals, mech_score, stage1_results,
-        history, theses, researches, news_results, lessons,
+        history, theses, researches, news_results, lessons, positions,
     )
 
     for attempt in range(max_retries + 1):
@@ -573,6 +588,7 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
         {"status": "resolved", "lessons_learned": {"$ne": None}},
         {"statement": 1, "lessons_learned": 1},
     ))
+    positions = list(db.positions.find({"status": "open"}))
 
     # 5. Stage 1: Signal-Analysten (4 parallel)
     print("Stage 1: Bewerte Signale (4 Analysten parallel)...")
@@ -590,7 +606,7 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
     try:
         stage2_result, synthesis_text = run_stage2(
             market, mech_signals, mech_score, stage1_results,
-            history, theses, researches, news_results, lessons,
+            history, theses, researches, news_results, lessons, positions,
         )
     except Exception as e:
         log.error("Synthese fehlgeschlagen: %s", e)
@@ -612,7 +628,7 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
         # Retry: nur Stage 2 wiederholen mit Fehler-Kontext
         retry_user = build_synthesis_prompt(
             market, mech_signals, mech_score, stage1_results,
-            history, theses, researches, news_results, lessons,
+            history, theses, researches, news_results, lessons, positions,
         )
         retry_user += (
             "\n\nWICHTIG: Die letzte Analyse hatte Validierungsfehler:\n"
