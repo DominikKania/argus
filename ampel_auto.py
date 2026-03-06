@@ -561,9 +561,28 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
             log.info("Bestehende Analyse f\u00fcr %s gel\u00f6scht.", date_str)
             print(f"Bestehende Analyse f\u00fcr {date_str} gel\u00f6scht \u2014 wird neu erstellt.")
 
+    # 0. Analyst Ratings & News synchronisieren
+    log.info("=== Auto-Ampel Start für %s ===", date_str)
+    print("Synchronisiere Analystenmeinungen...")
+    try:
+        from backend.routers.prices import sync_analyst_ratings
+        ar_results = sync_analyst_ratings(db)
+        ar_ok = len([r for r in ar_results if r["status"] == "ok"])
+        print(f"  {ar_ok} Assets aktualisiert")
+    except Exception as e:
+        log.warning("Analysten-Sync fehlgeschlagen: %s", e)
+
+    print("Sammle Analysten-News aus RSS-Feeds...")
+    try:
+        from backend.routers.prices import sync_all_analyst_news
+        an_results = sync_all_analyst_news(db)
+        an_ok = len([r for r in an_results if r["status"] == "ok"])
+        print(f"  {an_ok} Assets News analysiert")
+    except Exception as e:
+        log.warning("Analysten-News fehlgeschlagen: %s", e)
+
     # 1. Marktdaten holen
-    log.info("=== Auto-Ampel Start f\u00fcr %s ===", date_str)
-    print(f"Hole Marktdaten f\u00fcr {date_str}...")
+    print(f"Hole Marktdaten für {date_str}...")
 
     market = fetch_all_market_data(db, cpi_override=cpi_override)
 
@@ -676,6 +695,16 @@ def run_auto_ampel(db, date_override=None, cpi_override=None, dry_run=False):
 
     from argus import save_analysis
     save_analysis(db, analysis)
+
+    # 10. Opportunity Scanner
+    print("Starte Opportunity-Scan...")
+    try:
+        from backend.routers.scanner import run_opportunity_scan
+        scan_result = run_opportunity_scan(db)
+        opp_count = len(scan_result.get("opportunities", []))
+        print(f"  {opp_count} Opportunities gefunden")
+    except Exception as e:
+        log.warning("Opportunity-Scan fehlgeschlagen: %s", e)
 
     log.info("=== Auto-Ampel abgeschlossen: %s \u2192 %s ===", date_str, analysis["rating"]["overall"])
     return analysis

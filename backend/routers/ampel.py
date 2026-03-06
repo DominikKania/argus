@@ -269,6 +269,26 @@ def run_ampel_analysis():
             except Exception as e:
                 yield _sse_event("status", f"Kurs-Sync fehlgeschlagen: {e}")
 
+            # 1b. Sync analyst ratings
+            yield _sse_event("status", "Synchronisiere Analystenmeinungen...")
+            try:
+                from .prices import sync_analyst_ratings
+                ar_results = sync_analyst_ratings(db)
+                ar_ok = len([r for r in ar_results if r["status"] == "ok"])
+                yield _sse_event("status", f"Analystenmeinungen synchronisiert ({ar_ok} Assets).")
+            except Exception as e:
+                yield _sse_event("status", f"Analysten-Sync fehlgeschlagen: {e}")
+
+            # 1c. Sync analyst news (RSS)
+            yield _sse_event("status", "Sammle Analysten-News aus RSS-Feeds...")
+            try:
+                from .prices import sync_all_analyst_news
+                an_results = sync_all_analyst_news(db)
+                an_ok = len([r for r in an_results if r["status"] == "ok"])
+                yield _sse_event("status", f"Analysten-News analysiert ({an_ok} Assets).")
+            except Exception as e:
+                yield _sse_event("status", f"Analysten-News fehlgeschlagen: {e}")
+
             # 2. Market data
             yield _sse_event("status", "Hole Marktdaten...")
             market = fetch_all_market_data(db)
@@ -539,6 +559,17 @@ def run_ampel_analysis():
             yield _sse_event("status", "Speichere Analyse...")
             from argus import save_analysis
             save_analysis(db, analysis)
+
+            # 9. Opportunity Scanner
+            yield _sse_event("status", "Starte Opportunity-Scan...")
+            try:
+                from .scanner import run_opportunity_scan
+                scan_result = run_opportunity_scan(db)
+                opp_count = len(scan_result.get("opportunities", []))
+                yield _sse_event("status", f"Opportunity-Scan: {opp_count} Chancen gefunden")
+            except Exception as e:
+                log.warning("Opportunity-Scan fehlgeschlagen: %s", e)
+                yield _sse_event("status", f"Opportunity-Scan fehlgeschlagen: {e}")
 
             yield _sse_event("done", {
                 "rating": analysis["rating"]["overall"],
@@ -838,7 +869,7 @@ def search_all_embeddings(q: str, n: int = 3):
         from backend.embeddings import (
             find_similar_theses, find_similar_analyses,
             find_relevant_lessons, find_similar_news,
-            find_similar_research,
+            find_similar_research, find_similar_analyst_ratings,
         )
         results = {}
         for name, fn in [
@@ -847,6 +878,7 @@ def search_all_embeddings(q: str, n: int = 3):
             ("lessons", find_relevant_lessons),
             ("news", find_similar_news),
             ("research", find_similar_research),
+            ("analyst_ratings", find_similar_analyst_ratings),
         ]:
             try:
                 results[name] = fn(q, n=n)

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { API_ENDPOINTS } from '@/config/apiEndpoints'
 import { ApiService } from '@/services/apiService'
-import type { NewsTopic } from '@/types/news'
+import type { NewsTopic, WatchlistItem } from '@/types/news'
 
 export const useNewsStore = defineStore('news', () => {
   const topics = ref<NewsTopic[]>([])
@@ -10,6 +10,7 @@ export const useNewsStore = defineStore('news', () => {
   const loading = ref(false)
   const running = ref(false)
   const error = ref<string | null>(null)
+  const watchlist = ref<WatchlistItem[]>([])
 
   async function fetchTopics() {
     loading.value = true
@@ -37,11 +38,46 @@ export const useNewsStore = defineStore('news', () => {
     }
   }
 
+  async function fetchWatchlist() {
+    try {
+      watchlist.value = await ApiService.get<WatchlistItem[]>(API_ENDPOINTS.PRICES.WATCHLIST)
+    } catch (err) {
+      console.error('Watchlist laden fehlgeschlagen:', err)
+    }
+  }
+
+  async function addAsset(ticker: string, name?: string, category: string = 'stock'): Promise<WatchlistItem | null> {
+    try {
+      const created = await ApiService.post<WatchlistItem>(API_ENDPOINTS.PRICES.ADD_WATCHLIST, {
+        ticker, name: name || undefined, category,
+      })
+      watchlist.value.push(created)
+      watchlist.value.sort((a, b) => a.ticker.localeCompare(b.ticker))
+      return created
+    } catch (err: any) {
+      error.value = err?.response?.data?.detail || 'Fehler beim Hinzufügen'
+      console.error(err)
+      return null
+    }
+  }
+
+  async function removeAsset(ticker: string): Promise<boolean> {
+    try {
+      await ApiService.delete(API_ENDPOINTS.PRICES.REMOVE_WATCHLIST(ticker))
+      watchlist.value = watchlist.value.filter((w) => w.ticker !== ticker)
+      return true
+    } catch (err) {
+      console.error(err)
+      return false
+    }
+  }
+
   async function createTopic(
     title: string,
     prompt?: string,
     direction?: string,
     rssFeeds?: Array<{ name: string; url: string }>,
+    assets?: string[],
   ): Promise<NewsTopic | null> {
     loading.value = true
     error.value = null
@@ -51,6 +87,7 @@ export const useNewsStore = defineStore('news', () => {
         prompt: prompt || undefined,
         direction: direction || undefined,
         rss_feeds: rssFeeds || undefined,
+        assets: assets?.length ? assets : undefined,
       })
       topics.value.unshift(created)
       selectedTopic.value = created
@@ -64,7 +101,7 @@ export const useNewsStore = defineStore('news', () => {
     }
   }
 
-  async function updateTopic(id: string, data: { title?: string; prompt?: string; active?: boolean; rss_feeds?: Array<{ name: string; url: string }> }) {
+  async function updateTopic(id: string, data: { title?: string; prompt?: string; active?: boolean; rss_feeds?: Array<{ name: string; url: string }>; assets?: string[] }) {
     error.value = null
     try {
       const updated = await ApiService.put<NewsTopic>(API_ENDPOINTS.NEWS.UPDATE(id), data)
@@ -139,11 +176,11 @@ export const useNewsStore = defineStore('news', () => {
     }
   }
 
-  async function generatePrompt(title: string, direction?: string): Promise<string | null> {
+  async function generatePrompt(title: string, direction?: string, assets?: string[]): Promise<string | null> {
     try {
       const res = await ApiService.post<{ prompt: string }>(
         API_ENDPOINTS.NEWS.GENERATE_PROMPT,
-        { title, direction: direction || undefined },
+        { title, direction: direction || undefined, assets: assets?.length ? assets : undefined },
       )
       return res.prompt
     } catch (err) {
@@ -191,8 +228,12 @@ export const useNewsStore = defineStore('news', () => {
     loading,
     running,
     error,
+    watchlist,
     fetchTopics,
     fetchTopic,
+    fetchWatchlist,
+    addAsset,
+    removeAsset,
     createTopic,
     updateTopic,
     toggleActive,

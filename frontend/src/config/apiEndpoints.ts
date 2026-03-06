@@ -19,7 +19,15 @@ export const API_ENDPOINTS = {
   KNOWLEDGE_ASK: '/ampel/knowledge/ask',
   PRICES: {
     WATCHLIST: '/prices/watchlist',
+    ADD_WATCHLIST: '/prices/watchlist',
+    REMOVE_WATCHLIST: (ticker: string) => `/prices/watchlist/${ticker}`,
     TICKER: (ticker: string, days = 30) => `/prices/${ticker}?days=${days}`,
+    ANALYST_RATINGS: (ticker: string) => `/prices/analyst-ratings/${ticker}`,
+    ANALYST_RATINGS_HISTORY: (ticker: string) => `/prices/analyst-ratings/${ticker}/history`,
+    ANALYST_RATINGS_SYNC: '/prices/analyst-ratings/sync',
+    ASSET_NEWS: (ticker: string) => `/prices/asset-news/${ticker}`,
+    ANALYST_NEWS: (ticker: string) => `/prices/analyst-news/${ticker}`,
+    ANALYST_NEWS_SYNC: '/prices/analyst-news/sync',
     SYNC: '/prices/sync',
   },
   CHAT: '/chat/',
@@ -47,5 +55,10 @@ export const API_ENDPOINTS = {
     GENERATE_PROMPT: '/news/generate-prompt',
     REFINE_PROMPT: '/news/refine-prompt',
     SUGGEST_FEEDS: '/news/suggest-feeds',
+  },
+  SCANNER: {
+    RUN: '/scanner/run',
+    LATEST: '/scanner/latest',
+    HISTORY: (limit = 10) => `/scanner/history?limit=${limit}`,
   },
 } as const

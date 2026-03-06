@@ -147,6 +147,47 @@ def index_research(research_id: str, research: dict):
     log.info("Research indiziert: %s — %s", research_id, research.get("title", "?"))
 
 
+def index_analyst_rating(rating_id: str, rating: dict):
+    """Index analyst rating data for semantic search."""
+    parts = []
+    ticker = rating.get("ticker", "")
+    name = rating.get("name", ticker)
+    date = rating.get("date", "")
+
+    s = rating.get("summary", {})
+    parts.append(f"Analystenmeinungen {name} ({ticker}) vom {date}")
+    parts.append(
+        f"Strong Buy: {s.get('strongBuy', 0)}, Buy: {s.get('buy', 0)}, "
+        f"Hold: {s.get('hold', 0)}, Sell: {s.get('sell', 0)}, "
+        f"Strong Sell: {s.get('strongSell', 0)}, Total: {rating.get('total', 0)}"
+    )
+
+    # Include individual ratings
+    for ind in rating.get("individual", [])[:15]:
+        grade_info = f"{ind.get('firm', '')}: {ind.get('toGrade', '')}"
+        if ind.get("fromGrade"):
+            grade_info += f" (vorher: {ind['fromGrade']})"
+        if ind.get("action"):
+            grade_info += f" [{ind['action']}]"
+        parts.append(grade_info)
+
+    text = "\n".join(parts)
+    if not text.strip():
+        return
+
+    col = get_collection("analyst_ratings")
+    col.upsert(
+        ids=[rating_id],
+        documents=[text[:2000]],
+        metadatas=[{
+            "ticker": ticker,
+            "date": date,
+            "total": str(rating.get("total", 0)),
+        }],
+    )
+    log.info("Analyst-Rating indiziert: %s %s", ticker, date)
+
+
 def index_news(news_id: str, news: dict):
     """Index a news result for semantic search."""
     parts = []
@@ -231,6 +272,19 @@ def find_similar_research(query: str, n: int = 5) -> list[dict]:
     return _format_results(results)
 
 
+def find_similar_analyst_ratings(query: str, n: int = 5) -> list[dict]:
+    """Find analyst ratings semantically similar to a query."""
+    col = get_collection("analyst_ratings")
+    if col.count() == 0:
+        return []
+
+    results = col.query(
+        query_texts=[query],
+        n_results=min(n, col.count()),
+    )
+    return _format_results(results)
+
+
 def find_similar_news(query: str, n: int = 5) -> list[dict]:
     """Find news semantically similar to a query."""
     col = get_collection("news")
@@ -284,7 +338,7 @@ def check_thesis_duplicate(thesis: dict, threshold: float = 0.15) -> Optional[di
 
 def reindex_all(db):
     """Reindex all existing data from MongoDB into ChromaDB."""
-    count = {"theses": 0, "analyses": 0, "lessons": 0, "news": 0, "research": 0}
+    count = {"theses": 0, "analyses": 0, "lessons": 0, "news": 0, "research": 0, "analyst_ratings": 0}
 
     # Theses
     for doc in db.theses.find():
@@ -309,6 +363,11 @@ def reindex_all(db):
     for doc in db.researches.find({"status": "completed"}):
         index_research(str(doc["_id"]), doc)
         count["research"] += 1
+
+    # Analyst Ratings
+    for doc in db.analyst_ratings.find():
+        index_analyst_rating(str(doc["_id"]), doc)
+        count["analyst_ratings"] += 1
 
     log.info("Reindex abgeschlossen: %s", count)
     return count

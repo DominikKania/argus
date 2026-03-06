@@ -52,6 +52,10 @@ def _serialize(doc):
     """Convert MongoDB doc for JSON response."""
     if doc and "_id" in doc:
         doc["_id"] = str(doc["_id"])
+    # Migrate legacy asset (string) → assets (array)
+    if doc and "asset" in doc and "assets" not in doc:
+        doc["assets"] = [doc["asset"]] if doc["asset"] else []
+        del doc["asset"]
     return doc
 
 
@@ -65,7 +69,10 @@ Er soll Claude anweisen:
 - Welche Art von Headlines relevant sind
 - Worauf genau geachtet werden soll (Eskalation/De-Eskalation, Tonwechsel, Zeitplan etc.)
 - Welche Trigger-Events wichtig wären
-- Wie das Thema das IWDA-Portfolio (100% MSCI World ETF, ~6.700€) betrifft
+- Wie das Thema die zugeordneten Assets betrifft (falls angegeben)
+
+Wenn MEHRERE Assets zugeordnet sind, soll der Prompt die Auswirkungen auf JEDES dieser Assets \
+einzeln betrachten und vergleichen. Unterschiedliche Assets können unterschiedlich betroffen sein.
 
 ## REGELN
 - Schreibe den Prompt auf Deutsch, klar und spezifisch
@@ -81,8 +88,8 @@ den Prompt optimieren.
 ## HEUTIGES DATUM
 {today}
 
-## PORTFOLIO-KONTEXT
-Position: iShares Core MSCI World UCITS ETF USD (Acc) — ISIN: IE00B4L5Y983, ~6.700€, 100%
+## ASSETS-KONTEXT
+{asset_context}
 
 ## DEINE AUFGABE
 - Lies den Original-Prompt und den Gesprächsverlauf
@@ -104,6 +111,7 @@ class CreateNewsTopicRequest(BaseModel):
     prompt: Optional[str] = None
     direction: Optional[str] = None
     rss_feeds: Optional[list[dict]] = None
+    assets: Optional[list[str]] = None
 
 
 class UpdateNewsTopicRequest(BaseModel):
@@ -111,6 +119,7 @@ class UpdateNewsTopicRequest(BaseModel):
     prompt: Optional[str] = None
     active: Optional[bool] = None
     rss_feeds: Optional[list[dict]] = None
+    assets: Optional[list[str]] = None  # None = not sent, [] = clear, ["A","B"] = set
 
 
 class SuggestFeedsRequest(BaseModel):
@@ -121,12 +130,14 @@ class SuggestFeedsRequest(BaseModel):
 class GeneratePromptRequest(BaseModel):
     title: str
     direction: Optional[str] = None
+    assets: Optional[list[str]] = None
 
 
 class RefinePromptRequest(BaseModel):
     topic_title: str
     original_prompt: str
     chat_history: list[dict]
+    assets: Optional[list[str]] = None
 
 
 # ── Endpoints: Topics ───────────────────────────────────────────────────
@@ -187,6 +198,8 @@ def create_topic(req: CreateNewsTopicRequest):
     if not prompt:
         try:
             user_msg = f"Erstelle einen News-Analyse-Prompt zum Thema: {req.title}"
+            if req.assets:
+                user_msg += f"\n\nZugeordnete Assets: {', '.join(req.assets)} — Der Prompt soll die Auswirkungen auf diese Assets analysieren."
             if req.direction:
                 user_msg += f"\n\nFokus/Richtung des Users: {req.direction}"
             prompt = call_llm(
@@ -202,6 +215,7 @@ def create_topic(req: CreateNewsTopicRequest):
         "title": req.title,
         "prompt": prompt,
         "active": True,
+        "assets": req.assets or [],
         "rss_feeds": req.rss_feeds,
         "created_date": now,
         "updated_date": now,
@@ -265,6 +279,8 @@ def generate_prompt(req: GeneratePromptRequest):
     """Generate a news prompt without saving (for preview)."""
     try:
         user_msg = f"Erstelle einen News-Analyse-Prompt zum Thema: {req.title}"
+        if req.assets:
+            user_msg += f"\n\nZugeordnete Assets: {', '.join(req.assets)} — Der Prompt soll die Auswirkungen auf diese Assets analysieren und vergleichen."
         if req.direction:
             user_msg += f"\n\nFokus/Richtung des Users: {req.direction}"
         prompt = call_llm(
@@ -288,7 +304,11 @@ def refine_prompt(req: RefinePromptRequest):
             parts.append(f"\n**{role}:** {msg.get('content', '')}")
         parts.append("\n\nErstelle jetzt den verbesserten Prompt.")
 
-        system = REFINE_PROMPT_SYSTEM.format(today=datetime.now().strftime("%Y-%m-%d"))
+        asset_ctx = f"Analyse-Ziele: {', '.join(req.assets)}" if req.assets else "Allgemeines Investment-Monitoring"
+        system = REFINE_PROMPT_SYSTEM.format(
+            today=datetime.now().strftime("%Y-%m-%d"),
+            asset_context=asset_ctx,
+        )
         refined = call_llm(
             system,
             [{"role": "user", "content": "\n".join(parts)}],
@@ -318,6 +338,8 @@ def update_topic(id_or_slug: str, req: UpdateNewsTopicRequest):
     if req.rss_feeds is not None:
         # Empty list = reset to default feeds
         update["rss_feeds"] = req.rss_feeds if req.rss_feeds else None
+    if req.assets is not None:  # None = not sent, [] = clear, ["A","B"] = set
+        update["assets"] = req.assets
 
     db.news_topics.update_one({"_id": doc["_id"]}, {"$set": update})
 

@@ -26,19 +26,71 @@
             :disabled="!activeTopicsCount || newsStore.running"
             @click="runAllTopics"
           />
-          <Button label="Neues Thema" icon="pi pi-plus" size="small" @click="showNewDialog = true; createError = ''; newDirection = ''" />
+          <Button label="Neues Thema" icon="pi pi-plus" size="small" @click="showNewDialog = true; createError = ''; newDirection = ''; newAssets = []" />
         </div>
       </div>
 
       <div class="master-detail">
         <!-- Topic List (Master) -->
         <div class="topic-list">
-          <div v-if="!newsStore.topics.length" class="empty-list">
+          <!-- Assets Section -->
+          <div class="assets-section">
+            <button class="assets-toggle" @click="assetsOpen = !assetsOpen">
+              <i :class="assetsOpen ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" />
+              <span class="assets-toggle-label">Assets</span>
+              <span class="count-badge small">{{ newsStore.watchlist.length }}</span>
+            </button>
+            <div v-if="assetsOpen" class="assets-content">
+              <div v-for="w in newsStore.watchlist" :key="w.ticker" class="asset-item">
+                <span class="asset-item-ticker">{{ w.ticker }}</span>
+                <span class="asset-item-name">{{ w.name }}</span>
+                <span class="asset-item-cat">{{ w.category }}</span>
+                <button class="asset-item-remove" @click="removeAssetItem(w.ticker)" v-tooltip.top="'Entfernen'">
+                  <i class="pi pi-times" />
+                </button>
+              </div>
+              <div class="asset-add-row">
+                <InputText v-model="newAssetTicker" placeholder="Ticker (z.B. NVDA)" size="small" class="asset-add-ticker" @keyup.enter="addAssetItem" />
+                <Select
+                  v-model="newAssetCategory"
+                  :options="[{label: 'Aktie', value: 'stock'}, {label: 'ETF', value: 'etf'}]"
+                  optionLabel="label"
+                  optionValue="value"
+                  size="small"
+                  class="asset-add-cat"
+                />
+                <Button icon="pi pi-plus" size="small" severity="secondary" :disabled="!newAssetTicker.trim()" :loading="addingAsset" @click="addAssetItem" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Filter by asset -->
+          <div v-if="newsStore.watchlist.length" class="topic-filter">
+            <button
+              class="filter-chip"
+              :class="{ active: !filterAsset }"
+              @click="filterAsset = null"
+            >Alle</button>
+            <button
+              class="filter-chip"
+              :class="{ active: filterAsset === '__global__' }"
+              @click="filterAsset = '__global__'"
+            >Allgemein</button>
+            <button
+              v-for="w in newsStore.watchlist"
+              :key="w.ticker"
+              class="filter-chip"
+              :class="{ active: filterAsset === w.ticker }"
+              @click="filterAsset = filterAsset === w.ticker ? null : w.ticker"
+            >{{ w.ticker }}</button>
+          </div>
+
+          <div v-if="!filteredTopics.length" class="empty-list">
             <i class="pi pi-megaphone" />
-            <p>Noch keine News-Themen.</p>
+            <p>{{ newsStore.topics.length ? 'Keine Themen für diesen Filter.' : 'Noch keine News-Themen.' }}</p>
           </div>
           <button
-            v-for="t in newsStore.topics"
+            v-for="t in filteredTopics"
             :key="t._id"
             class="topic-item"
             :class="{ active: newsStore.selectedTopic?._id === t._id }"
@@ -48,6 +100,7 @@
             <div class="topic-item-text">
               <span class="topic-item-title">{{ t.title }}</span>
               <span class="topic-item-meta">
+                <span v-for="a in (t.assets || [])" :key="a" class="asset-badge">{{ a }}</span>
                 <span v-if="!t.active" class="inactive-label">Inaktiv</span>
                 <template v-else-if="t.latest_result">
                   {{ t.latest_result.date }}
@@ -63,6 +116,17 @@
           <div class="detail-header">
             <div class="detail-title-row">
               <h2 class="detail-title">{{ newsStore.selectedTopic.title }}</h2>
+              <MultiSelect
+                :modelValue="newsStore.selectedTopic.assets || []"
+                @update:modelValue="updateAssets"
+                :options="assetOptions"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="Keine Assets"
+                class="asset-select"
+                :maxSelectedLabels="3"
+                selectedItemsLabel="{0} Assets"
+              />
               <span
                 class="active-badge"
                 :class="newsStore.selectedTopic.active ? 'badge-active' : 'badge-inactive'"
@@ -359,6 +423,18 @@
           class="w-full"
           :disabled="creating"
         />
+        <label class="form-label">Assets <small class="optional-hint">(optional — leer = allgemein)</small></label>
+        <MultiSelect
+          v-model="newAssets"
+          :options="assetOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="Keine Assets (allgemein)"
+          class="w-full"
+          :disabled="creating"
+          :maxSelectedLabels="3"
+          selectedItemsLabel="{0} Assets"
+        />
         <label class="form-label">Fokus / Richtung <small class="optional-hint">(optional)</small></label>
         <Textarea
           v-model="newDirection"
@@ -393,13 +469,22 @@ import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
+import Select from 'primevue/select'
+import MultiSelect from 'primevue/multiselect'
 
 const newsStore = useNewsStore()
 const chatStore = useChatStore()
 
+const assetsOpen = ref(false)
+const newAssetTicker = ref('')
+const newAssetCategory = ref('stock')
+const addingAsset = ref(false)
+const filterAsset = ref<string | null>(null)
+
 const showNewDialog = ref(false)
 const newTitle = ref('')
 const newDirection = ref('')
+const newAssets = ref<string[]>([])
 const creating = ref(false)
 const createError = ref('')
 const generatingPrompt = ref(false)
@@ -434,6 +519,28 @@ const SUGGESTED_FEEDS = [
 
 function renderMarkdown(md: string): string {
   return marked.parse(md, { async: false }) as string
+}
+
+const assetOptions = computed(() =>
+  newsStore.watchlist.map((w) => ({ label: `${w.ticker} — ${w.name}`, value: w.ticker }))
+)
+
+const filteredTopics = computed(() => {
+  if (!filterAsset.value) return newsStore.topics
+  if (filterAsset.value === '__global__') return newsStore.topics.filter((t) => !t.assets?.length)
+  return newsStore.topics.filter((t) => t.assets?.includes(filterAsset.value!))
+})
+
+async function addAssetItem() {
+  if (!newAssetTicker.value.trim()) return
+  addingAsset.value = true
+  await newsStore.addAsset(newAssetTicker.value.trim(), undefined, newAssetCategory.value)
+  addingAsset.value = false
+  newAssetTicker.value = ''
+}
+
+async function removeAssetItem(ticker: string) {
+  await newsStore.removeAsset(ticker)
 }
 
 const topicFeeds = computed(() => newsStore.selectedTopic?.rss_feeds || [])
@@ -540,6 +647,7 @@ function closeNewDialog() {
   showNewDialog.value = false
   newTitle.value = ''
   newDirection.value = ''
+  newAssets.value = []
   createError.value = ''
 }
 
@@ -551,6 +659,8 @@ async function createNewTopic() {
     newTitle.value.trim(),
     undefined,
     newDirection.value.trim() || undefined,
+    undefined,
+    newAssets.value.length ? newAssets.value : undefined,
   )
   creating.value = false
   if (created) {
@@ -560,10 +670,15 @@ async function createNewTopic() {
   }
 }
 
+async function updateAssets(value: string[]) {
+  if (!newsStore.selectedTopic) return
+  await newsStore.updateTopic(newsStore.selectedTopic._id, { assets: value })
+}
+
 async function regeneratePrompt() {
   if (!newsStore.selectedTopic) return
   generatingPrompt.value = true
-  const prompt = await newsStore.generatePrompt(newsStore.selectedTopic.title)
+  const prompt = await newsStore.generatePrompt(newsStore.selectedTopic.title, undefined, newsStore.selectedTopic.assets)
   generatingPrompt.value = false
   if (prompt) {
     editablePrompt.value = prompt
@@ -633,6 +748,7 @@ function askAbout() {
 
 onMounted(() => {
   newsStore.fetchTopics()
+  newsStore.fetchWatchlist()
 })
 </script>
 
@@ -713,6 +829,115 @@ onMounted(() => {
   }
 }
 
+// Assets Section
+.assets-section {
+  border-bottom: 1px solid var(--p-surface-border);
+}
+
+.assets-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--p-text-color);
+  font-size: 0.75rem;
+  font-weight: 600;
+
+  > i:first-child { font-size: 0.6rem; color: var(--p-text-color-secondary); }
+}
+
+.assets-toggle-label { flex: 1; text-align: left; }
+
+.assets-content {
+  padding: 0 0.5rem 0.5rem;
+}
+
+.asset-item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.375rem;
+  border-radius: 6px;
+  font-size: 0.7rem;
+
+  &:hover { background: var(--p-surface-hover); }
+}
+
+.asset-item-ticker {
+  font-weight: 700;
+  color: var(--p-primary-500);
+  min-width: 55px;
+}
+
+.asset-item-name {
+  flex: 1;
+  color: var(--p-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-item-cat {
+  font-size: 0.6rem;
+  color: var(--p-text-color-secondary);
+  opacity: 0.6;
+}
+
+.asset-item-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--p-text-color-secondary);
+  padding: 0.125rem;
+  font-size: 0.6rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+
+  .asset-item:hover & { opacity: 1; }
+  &:hover { color: #ef4444; }
+}
+
+.asset-add-row {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.375rem;
+}
+
+.asset-add-ticker { flex: 1; min-width: 0; }
+.asset-add-cat { width: 80px; }
+
+// Topic Filter
+.topic-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--p-surface-border);
+}
+
+.filter-chip {
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid var(--p-surface-border);
+  background: none;
+  color: var(--p-text-color-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover { border-color: var(--p-primary-300); }
+  &.active {
+    background: color-mix(in srgb, var(--p-primary-500) 15%, transparent);
+    color: var(--p-primary-500);
+    border-color: var(--p-primary-400);
+  }
+}
+
 .empty-list {
   display: flex;
   flex-direction: column;
@@ -781,6 +1006,21 @@ onMounted(() => {
 .inactive-label {
   color: #9ca3af;
   font-style: italic;
+}
+
+.asset-badge {
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--p-primary-500) 15%, transparent);
+  color: var(--p-primary-500);
+  letter-spacing: 0.3px;
+}
+
+.asset-select {
+  max-width: 200px;
+  font-size: 0.8rem;
 }
 
 // Detail Panel

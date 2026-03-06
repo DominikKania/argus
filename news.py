@@ -110,7 +110,7 @@ Er soll Claude anweisen:
 - Welche Art von Headlines relevant sind
 - Worauf genau geachtet werden soll (Eskalation/De-Eskalation, Tonwechsel, Zeitplan etc.)
 - Welche Trigger-Events wichtig wären
-- Wie das Thema das IWDA-Portfolio (100% MSCI World ETF) betrifft
+- Wie das Thema die zugeordneten Assets betrifft (bei mehreren Assets: Auswirkungen vergleichen)
 
 Schreibe den Prompt auf Deutsch, klar und spezifisch. Maximal 10-15 Zeilen.
 Gib NUR den Prompt-Text zurück, keine Erklärung.\

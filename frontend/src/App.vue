@@ -79,6 +79,18 @@ createNavigation({
       active: route.path.startsWith('/news'),
     },
     {
+      label: 'Analysten',
+      icon: 'pi pi-users',
+      to: '/analysten',
+      active: route.path.startsWith('/analysten'),
+    },
+    {
+      label: 'Scanner',
+      icon: 'pi pi-bolt',
+      to: '/scanner',
+      active: route.path.startsWith('/scanner'),
+    },
+    {
       label: 'Wissen',
       icon: 'pi pi-sparkles',
       to: '/suche',

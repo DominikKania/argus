@@ -43,6 +43,18 @@ const routes = [
         meta: { title: 'News' },
       },
       {
+        path: 'analysten',
+        name: 'analysten',
+        component: () => import('@/views/AnalystenView.vue'),
+        meta: { title: 'Analysten' },
+      },
+      {
+        path: 'scanner',
+        name: 'scanner',
+        component: () => import('@/views/ScannerView.vue'),
+        meta: { title: 'Scanner' },
+      },
+      {
         path: 'suche',
         name: 'suche',
         component: () => import('@/views/SearchView.vue'),

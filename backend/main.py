@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import ampel, chat, news, prices, research
+from .routers import ampel, chat, news, prices, research, scanner
 
 app = FastAPI(title="Argus API", version="0.1.0")
 
@@ -20,6 +20,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(prices.router, prefix="/api/prices", tags=["prices"])
 app.include_router(research.router, prefix="/api/research", tags=["research"])
 app.include_router(news.router, prefix="/api/news", tags=["news"])
+app.include_router(scanner.router, prefix="/api/scanner", tags=["scanner"])
 
 
 @app.get("/api/health")

@@ -35,9 +35,16 @@ export interface NewsTopic {
   title: string
   prompt: string
   active: boolean
+  assets: string[]
   rss_feeds: RssFeed[] | null
   created_date: string
   updated_date: string
   latest_result: NewsResult | null
   results_history?: NewsResult[]
+}
+
+export interface WatchlistItem {
+  ticker: string
+  name: string
+  category: 'etf' | 'stock'
 }
