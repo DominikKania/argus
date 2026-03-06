@@ -141,6 +141,96 @@
             />
           </div>
 
+          <!-- RSS Feeds -->
+          <div class="feeds-section">
+            <button class="feeds-toggle" @click="feedsOpen = !feedsOpen">
+              <i :class="feedsOpen ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" />
+              <label class="section-label">
+                RSS-Feeds
+                <span class="feeds-count">{{ topicFeeds.length || 'Standard' }}</span>
+              </label>
+            </button>
+
+            <div v-if="feedsOpen" class="feeds-content">
+              <div v-if="!topicFeeds.length" class="feeds-default-hint">
+                <i class="pi pi-info-circle" />
+                Verwendet die Standard-Feeds ({{ defaultFeedCount }}). Eigene Feeds hinzufügen um die Quellen für dieses Thema anzupassen.
+              </div>
+
+              <!-- Current feeds list -->
+              <div v-if="topicFeeds.length" class="feeds-list">
+                <div v-for="(feed, i) in topicFeeds" :key="i" class="feed-item">
+                  <div class="feed-info">
+                    <span class="feed-name">{{ feed.name }}</span>
+                    <span class="feed-url">{{ feed.url }}</span>
+                  </div>
+                  <button class="feed-remove" @click="removeFeed(i)" v-tooltip.top="'Entfernen'">
+                    <i class="pi pi-times" />
+                  </button>
+                </div>
+                <button class="feeds-reset" @click="resetFeeds">
+                  <i class="pi pi-undo" />
+                  Auf Standard-Feeds zurücksetzen
+                </button>
+              </div>
+
+              <!-- Suggested feeds -->
+              <div class="feeds-suggestions">
+                <div class="feeds-suggestions-header">
+                  <label class="feeds-suggestions-label">Vorschläge:</label>
+                  <Button
+                    label="Feeds finden"
+                    icon="pi pi-sparkles"
+                    size="small"
+                    severity="secondary"
+                    text
+                    :loading="suggestingFeeds"
+                    @click="suggestFeedsForTopic"
+                  />
+                </div>
+
+                <!-- LLM suggestions -->
+                <div v-if="llmSuggestedFeeds.length" class="feeds-chips llm-suggestions">
+                  <button
+                    v-for="s in llmSuggestedFeeds"
+                    :key="s.url"
+                    class="feed-chip feed-chip-llm"
+                    @click="addSuggestedFeed(s); llmSuggestedFeeds = llmSuggestedFeeds.filter(f => f.url !== s.url)"
+                  >
+                    <i class="pi pi-plus" /> {{ s.name }}
+                  </button>
+                  <button class="feed-chip feed-chip-all" @click="addAllLlmFeeds">
+                    <i class="pi pi-check-circle" /> Alle hinzufügen
+                  </button>
+                </div>
+
+                <div class="feeds-chips">
+                  <button
+                    v-for="s in availableSuggestions"
+                    :key="s.url"
+                    class="feed-chip"
+                    @click="addSuggestedFeed(s)"
+                  >
+                    <i class="pi pi-plus" /> {{ s.name }}
+                  </button>
+                </div>
+              </div>
+
+              <!-- Add custom feed -->
+              <div class="feed-add-form">
+                <InputText v-model="newFeedName" placeholder="Name" size="small" class="feed-add-name" />
+                <InputText v-model="newFeedUrl" placeholder="https://..." size="small" class="feed-add-url" />
+                <Button
+                  icon="pi pi-plus"
+                  size="small"
+                  severity="secondary"
+                  :disabled="!newFeedName.trim() || !newFeedUrl.trim()"
+                  @click="addCustomFeed"
+                />
+              </div>
+            </div>
+          </div>
+
           <!-- Latest Result -->
           <div v-if="latestResult" class="results-section">
             <div class="results-header">
@@ -316,9 +406,88 @@ const generatingPrompt = ref(false)
 const editablePrompt = ref('')
 const runningAll = ref(false)
 const deepResearchOpen = ref(true)
+const feedsOpen = ref(false)
+const newFeedName = ref('')
+const newFeedUrl = ref('')
+const suggestingFeeds = ref(false)
+const llmSuggestedFeeds = ref<Array<{ name: string; url: string }>>([])
+const defaultFeedCount = 17
+
+const SUGGESTED_FEEDS = [
+  { name: 'Reuters World', url: 'https://www.reutersagency.com/feed/?best-topics=political-general' },
+  { name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml' },
+  { name: 'BBC Business', url: 'https://feeds.bbci.co.uk/news/business/rss.xml' },
+  { name: 'Bloomberg Markets', url: 'https://feeds.bloomberg.com/markets/news.rss' },
+  { name: 'CNBC Markets', url: 'https://www.cnbc.com/id/20910258/device/rss/rss.html' },
+  { name: 'FT Markets', url: 'https://www.ft.com/markets?format=rss' },
+  { name: 'MarketWatch', url: 'https://feeds.marketwatch.com/marketwatch/marketpulse' },
+  { name: 'Tagesschau Wirtschaft', url: 'https://www.tagesschau.de/wirtschaft/index~rss2.xml' },
+  { name: 'Tagesschau Inland', url: 'https://www.tagesschau.de/inland/index~rss2.xml' },
+  { name: 'Tagesschau Ausland', url: 'https://www.tagesschau.de/ausland/index~rss2.xml' },
+  { name: 'Handelsblatt', url: 'https://www.handelsblatt.com/contentexport/feed/finanzen' },
+  { name: 'FAZ Finanzen', url: 'https://www.faz.net/rss/aktuell/finanzen/' },
+  { name: 'Spiegel Wirtschaft', url: 'https://www.spiegel.de/wirtschaft/index.rss' },
+  { name: 'Spiegel Politik', url: 'https://www.spiegel.de/politik/index.rss' },
+  { name: 'NTV Wirtschaft', url: 'https://www.n-tv.de/wirtschaft/rss' },
+  { name: 'NTV Politik', url: 'https://www.n-tv.de/politik/rss' },
+]
 
 function renderMarkdown(md: string): string {
   return marked.parse(md, { async: false }) as string
+}
+
+const topicFeeds = computed(() => newsStore.selectedTopic?.rss_feeds || [])
+
+const availableSuggestions = computed(() => {
+  const current = new Set(topicFeeds.value.map((f: { url: string }) => f.url))
+  return SUGGESTED_FEEDS.filter((s) => !current.has(s.url))
+})
+
+async function addSuggestedFeed(feed: { name: string; url: string }) {
+  if (!newsStore.selectedTopic) return
+  const feeds = [...topicFeeds.value, feed]
+  await newsStore.updateTopic(newsStore.selectedTopic._id, { rss_feeds: feeds })
+}
+
+async function addCustomFeed() {
+  if (!newsStore.selectedTopic || !newFeedName.value.trim() || !newFeedUrl.value.trim()) return
+  const feeds = [...topicFeeds.value, { name: newFeedName.value.trim(), url: newFeedUrl.value.trim() }]
+  await newsStore.updateTopic(newsStore.selectedTopic._id, { rss_feeds: feeds })
+  newFeedName.value = ''
+  newFeedUrl.value = ''
+}
+
+async function removeFeed(index: number) {
+  if (!newsStore.selectedTopic) return
+  const feeds = topicFeeds.value.filter((_: any, i: number) => i !== index)
+  await newsStore.updateTopic(newsStore.selectedTopic._id, { rss_feeds: feeds.length ? feeds : [] })
+}
+
+async function suggestFeedsForTopic() {
+  if (!newsStore.selectedTopic) return
+  suggestingFeeds.value = true
+  const feeds = await newsStore.suggestFeeds(
+    newsStore.selectedTopic.title,
+    newsStore.selectedTopic.prompt,
+  )
+  suggestingFeeds.value = false
+  if (feeds) {
+    // Filter out feeds already added to the topic
+    const current = new Set(topicFeeds.value.map((f: { url: string }) => f.url))
+    llmSuggestedFeeds.value = feeds.filter((f) => !current.has(f.url))
+  }
+}
+
+async function addAllLlmFeeds() {
+  if (!newsStore.selectedTopic || !llmSuggestedFeeds.value.length) return
+  const feeds = [...topicFeeds.value, ...llmSuggestedFeeds.value]
+  await newsStore.updateTopic(newsStore.selectedTopic._id, { rss_feeds: feeds })
+  llmSuggestedFeeds.value = []
+}
+
+async function resetFeeds() {
+  if (!newsStore.selectedTopic) return
+  await newsStore.updateTopic(newsStore.selectedTopic._id, { rss_feeds: [] })
 }
 
 const activeTopicsCount = computed(() => newsStore.topics.filter((t) => t.active).length)
@@ -738,6 +907,239 @@ onMounted(() => {
 
   &:focus { border-color: var(--p-primary-500); }
   &::placeholder { color: var(--p-text-color-secondary); }
+}
+
+// RSS Feeds
+.feeds-section {
+  border-top: 1px solid var(--p-surface-border);
+  padding-top: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.feeds-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+
+  i {
+    font-size: 0.75rem;
+    color: var(--p-text-color-secondary);
+  }
+
+  .section-label {
+    margin-bottom: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  &:hover .section-label { color: var(--p-text-color); }
+}
+
+.feeds-count {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: var(--p-surface-ground);
+  color: var(--p-text-color-secondary);
+}
+
+.feeds-content {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.feeds-default-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.06);
+  font-size: 0.75rem;
+  color: var(--p-text-color-secondary);
+  line-height: 1.5;
+
+  :root.dark & { background: rgba(59, 130, 246, 0.08); }
+
+  i { color: #3b82f6; margin-top: 0.1rem; flex-shrink: 0; }
+}
+
+.feeds-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.feed-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 6px;
+  background: var(--p-surface-ground);
+  font-size: 0.75rem;
+}
+
+.feed-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+  min-width: 0;
+}
+
+.feed-name {
+  font-weight: 500;
+  color: var(--p-text-color);
+}
+
+.feed-url {
+  font-size: 0.6875rem;
+  color: var(--p-text-color-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--p-text-color-secondary);
+  padding: 0.25rem;
+  border-radius: 4px;
+  font-size: 0.625rem;
+  flex-shrink: 0;
+
+  &:hover { color: #ef4444; background: rgba(239, 68, 68, 0.08); }
+}
+
+.feeds-reset {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.75rem;
+  color: var(--p-text-color-secondary);
+  padding: 0.375rem 0;
+
+  &:hover { color: var(--p-primary-500); }
+
+  i { font-size: 0.625rem; }
+}
+
+.feeds-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.feeds-suggestions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.feeds-suggestions-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--p-text-color-secondary);
+}
+
+.llm-suggestions {
+  padding: 0.5rem;
+  border-radius: 8px;
+  background: rgba(139, 92, 246, 0.04);
+  border: 1px dashed rgba(139, 92, 246, 0.2);
+
+  :root.dark & {
+    background: rgba(139, 92, 246, 0.08);
+    border-color: rgba(139, 92, 246, 0.3);
+  }
+}
+
+.feed-chip-llm {
+  border-color: rgba(139, 92, 246, 0.3);
+
+  &:hover {
+    border-color: #8b5cf6;
+    color: #8b5cf6;
+
+    i { color: #8b5cf6; }
+  }
+}
+
+.feed-chip-all {
+  border-color: rgba(16, 185, 129, 0.3);
+  font-weight: 600;
+
+  i { color: #10b981; }
+
+  &:hover {
+    border-color: #10b981;
+    color: #10b981;
+    background: rgba(16, 185, 129, 0.04);
+  }
+}
+
+.feeds-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.feed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--p-surface-border);
+  background: var(--p-surface-card);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  color: var(--p-text-color);
+  transition: all 0.15s;
+
+  i { font-size: 0.5rem; color: var(--p-text-color-secondary); }
+
+  &:hover {
+    border-color: var(--p-primary-500);
+    color: var(--p-primary-500);
+    background: rgba(99, 102, 241, 0.04);
+
+    i { color: var(--p-primary-500); }
+  }
+}
+
+.feed-add-form {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.feed-add-name {
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.feed-add-url {
+  flex: 1;
+  min-width: 0;
 }
 
 // Results

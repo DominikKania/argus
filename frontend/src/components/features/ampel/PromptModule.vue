@@ -31,24 +31,61 @@
       </button>
 
       <div v-if="sections.llmOutput" class="section-body">
-        <!-- Signal chips -->
-        <div v-if="Object.keys(signalResults).length || running" class="signal-progress">
-          <div
-            v-for="name in ['trend', 'volatility', 'macro', 'sentiment']"
-            :key="name"
-            :class="['signal-chip', signalResults[name] ? `chip-${signalResults[name].context}` : 'chip-pending']"
-          >
-            <span class="chip-label">{{ signalLabels[name] }}</span>
-            <span v-if="signalResults[name]" class="chip-context">{{ signalResults[name].context }}</span>
-            <i v-if="signalResults[name]" class="pi pi-check chip-icon" />
-            <i v-else-if="running" class="pi pi-spin pi-spinner chip-icon" />
-          </div>
-        </div>
 
         <div v-if="runError" class="status-msg error">
           <i class="pi pi-exclamation-triangle" /> {{ runError }}
         </div>
-        <pre v-if="llmOutput" ref="llmOutputEl" class="llm-output">{{ cleanLlmOutput }}</pre>
+
+        <!-- Alle LLM-Ausgaben chronologisch -->
+        <div class="llm-calls-list">
+          <!-- Stage 1: Signal-Analysten -->
+          <div v-for="name in ['trend', 'volatility', 'macro', 'sentiment']" :key="'s1-' + name">
+            <div v-if="stage1Outputs[name] || (running && !signalResults[name])" class="llm-call-block">
+              <div class="llm-call-header" :class="signalResults[name] ? `border-${signalResults[name].context}` : ''">
+                <span class="llm-call-label">Stage 1: {{ signalLabels[name] }}</span>
+                <span v-if="signalResults[name]" :class="['ctx-badge', `ctx-${signalResults[name].context}`]">{{ signalResults[name].context }}</span>
+                <i v-if="!signalResults[name] && running" class="pi pi-spin pi-spinner llm-call-spinner" />
+              </div>
+              <div v-if="stage1Inputs[name]" class="llm-input-section">
+                <button class="llm-input-toggle" @click="stage1InputOpen[name] = !stage1InputOpen[name]">
+                  <i :class="stage1InputOpen[name] ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" />
+                  <span>Input-Daten</span>
+                </button>
+                <pre v-if="stage1InputOpen[name]" class="llm-raw llm-input-raw">{{ stage1Inputs[name] }}</pre>
+              </div>
+              <pre v-if="stage1Outputs[name]" class="llm-raw">{{ stage1Outputs[name] }}</pre>
+            </div>
+          </div>
+
+          <!-- News: Headline-Analysen + Deep-Research -->
+          <template v-for="(info, topic) in newsTopicResults" :key="'news-' + topic">
+            <div v-if="info.headlineStep" class="llm-call-block">
+              <div class="llm-call-header">
+                <span class="llm-call-label">News: {{ info.title }} — Headline-Analyse</span>
+                <span v-if="info.headlineStep.result?.trend" :class="['trend-badge', `trend-${info.headlineStep.result.trend}`]">{{ info.headlineStep.result.trend }}</span>
+                <i v-if="info.headlineStep.status === 'running'" class="pi pi-spin pi-spinner llm-call-spinner" />
+              </div>
+              <pre v-if="info.headlineStep.llm_raw" class="llm-raw">{{ info.headlineStep.llm_raw }}</pre>
+            </div>
+            <div v-if="info.deepResearchStep" class="llm-call-block">
+              <div class="llm-call-header">
+                <span class="llm-call-label">News: {{ info.title }} — Deep-Research</span>
+                <i v-if="info.deepResearchStep.status === 'running'" class="pi pi-spin pi-spinner llm-call-spinner" />
+              </div>
+              <pre v-if="info.deepResearchStep.llm_raw" class="llm-raw">{{ info.deepResearchStep.llm_raw }}</pre>
+            </div>
+          </template>
+
+          <!-- Stage 2: Synthese -->
+          <div v-if="llmOutput || running" class="llm-call-block">
+            <div class="llm-call-header">
+              <span class="llm-call-label">Stage 2: Synthese</span>
+              <i v-if="running && !runResult" class="pi pi-spin pi-spinner llm-call-spinner" />
+            </div>
+            <pre v-if="llmOutput" ref="llmOutputEl" class="llm-raw">{{ cleanLlmOutput }}</pre>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -222,7 +259,7 @@
           </button>
           <div v-if="expanded['earnings-recent']" class="item-detail">
             <div v-for="r in earnings.recently_reported" :key="r.ticker">
-              <strong>{{ r.ticker }}</strong> ({{ r.sector }}) — Surprise {{ r.surprise_pct > 0 ? '+' : '' }}{{ r.surprise_pct?.toFixed(1) }}%
+              <strong>{{ r.ticker }}</strong> ({{ r.sector }}) — Surprise {{ (r.surprise_pct ?? 0) > 0 ? '+' : '' }}{{ r.surprise_pct?.toFixed(1) }}%
             </div>
           </div>
         </div>
@@ -311,7 +348,7 @@ import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ApiService } from '@/services/apiService'
 import { API_ENDPOINTS } from '@/config/apiEndpoints'
 import { useChatStore } from '@/stores/chatStore'
-import type { AnalysisPrompts } from '@/types/ampel'
+import type { AnalysisPrompts, TopHoldings, EarningsData } from '@/types/ampel'
 
 const chatStore = useChatStore()
 
@@ -370,8 +407,8 @@ const newsTopics = ref<NewsResult[] | null>(null)
 const loadingNews = ref(false)
 const errorNews = ref('')
 
-const earnings = ref<Record<string, unknown> | null>(null)
-const topHoldings = ref<Record<string, unknown> | null>(null)
+const earnings = ref<EarningsData | null>(null)
+const topHoldings = ref<TopHoldings | null>(null)
 
 const holdingsHealthClass = computed(() => {
   if (!topHoldings.value) return ''
@@ -392,6 +429,43 @@ const llmOutput = ref('')
 const runResult = ref<RunResult | null>(null)
 const runError = ref('')
 const llmOutputEl = ref<HTMLPreElement | null>(null)
+
+// ── Pipeline transparency state ──
+const stage1Outputs = reactive<Record<string, string>>({})
+const stage1Inputs = reactive<Record<string, string>>({})
+const stage1InputOpen = reactive<Record<string, boolean>>({})
+
+interface NewsStep {
+  step: 'rss_fetch' | 'headline_analysis' | 'deep_research'
+  topic?: string
+  title?: string
+  status: 'running' | 'done'
+  detail: string
+  llm_raw?: string
+  result?: {
+    trend?: string
+    summary?: string
+    development?: string
+    relevant_count?: number
+    sentiment_count?: Record<string, number>
+    triggers_detected?: string[]
+    ampel_relevance?: string
+  }
+}
+const newsSteps = ref<NewsStep[]>([])
+
+// Group news steps by topic for display
+const newsTopicResults = computed(() => {
+  const map: Record<string, { title: string; headlineStep?: NewsStep; deepResearchStep?: NewsStep }> = {}
+  for (const step of newsSteps.value) {
+    if (step.step === 'rss_fetch') continue
+    const key = step.topic || '_unknown'
+    if (!map[key]) map[key] = { title: step.title || key }
+    if (step.step === 'headline_analysis') map[key].headlineStep = step
+    if (step.step === 'deep_research') map[key].deepResearchStep = step
+  }
+  return map
+})
 
 const cleanLlmOutput = computed(() =>
   llmOutput.value.replace(/^```(?:json)?\s*\n?/gm, '').replace(/\n?\s*```\s*$/gm, ''),
@@ -479,10 +553,20 @@ async function runAnalysis() {
   llmOutput.value = ''
   runResult.value = null
   runError.value = ''
-  // Clear previous signal results
+  // Clear previous results
   for (const key of Object.keys(signalResults)) {
     delete signalResults[key]
   }
+  for (const key of Object.keys(stage1Outputs)) {
+    delete stage1Outputs[key]
+  }
+  for (const key of Object.keys(stage1Inputs)) {
+    delete stage1Inputs[key]
+  }
+  for (const key of Object.keys(stage1InputOpen)) {
+    delete stage1InputOpen[key]
+  }
+  newsSteps.value = []
   sections.llmOutput = true
 
   try {
@@ -526,6 +610,29 @@ async function runAnalysis() {
               signalResults[event.data.name] = {
                 context: event.data.context,
                 note: event.data.note || '',
+              }
+              break
+            case 'stage1_output':
+              stage1Outputs[event.data.name] = event.data.text
+              if (event.data.input) {
+                stage1Inputs[event.data.name] = event.data.input
+              }
+              break
+            case 'news_step':
+              // Update status text to show news progress
+              if (event.data.status === 'running') {
+                runStatus.value = event.data.detail
+              }
+              // Update existing step or add new one
+              {
+                const idx = newsSteps.value.findIndex(
+                  s => s.step === event.data.step && (s.topic ?? '') === (event.data.topic ?? ''),
+                )
+                if (idx >= 0) {
+                  newsSteps.value.splice(idx, 1, event.data)
+                } else {
+                  newsSteps.value.push(event.data)
+                }
               }
               break
             case 'chunk':
@@ -606,12 +713,37 @@ onMounted(async () => {
         }
       }
     }
+    // Restore Stage 1 raw LLM outputs
+    const savedStage1 = latest.stage1_outputs as Record<string, string> | undefined
+    if (savedStage1) {
+      for (const [name, jsonStr] of Object.entries(savedStage1)) {
+        if (!jsonStr) continue
+        try {
+          const parsed = JSON.parse(jsonStr)
+          if (parsed._raw_text) {
+            stage1Outputs[name] = parsed._raw_text
+          } else {
+            // Fallback: show the JSON itself
+            stage1Outputs[name] = jsonStr
+          }
+        } catch {
+          stage1Outputs[name] = jsonStr
+        }
+      }
+    }
+    // Restore Stage 1 inputs
+    const savedInputs = latest.stage1_inputs as Record<string, string> | undefined
+    if (savedInputs) {
+      for (const [name, text] of Object.entries(savedInputs)) {
+        if (text) stage1Inputs[name] = text
+      }
+    }
     const market = latest?.market as Record<string, unknown> | undefined
     if (market?.earnings) {
-      earnings.value = market.earnings as Record<string, unknown>
+      earnings.value = market.earnings as EarningsData
     }
     if (market?.top_holdings) {
-      topHoldings.value = market.top_holdings as Record<string, unknown>
+      topHoldings.value = market.top_holdings as TopHoldings
     }
   } catch {
     // No analysis yet — that's fine
@@ -1003,21 +1135,6 @@ onMounted(async () => {
   overflow-y: auto;
 }
 
-.llm-output {
-  margin: 0;
-  padding: 0.75rem;
-  border-radius: 8px;
-  background: #1e1e2e;
-  border: 1px solid var(--p-surface-border);
-  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 0.7rem;
-  line-height: 1.6;
-  color: #cdd6f4;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 600px;
-  overflow-y: auto;
-}
 
 .health-badge {
   font-size: 0.7rem;
@@ -1039,61 +1156,98 @@ onMounted(async () => {
   }
 }
 
-// ── Signal progress chips ──
-.signal-progress {
+// ── LLM Calls List ──
+.llm-calls-list {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.625rem;
 }
 
-.signal-chip {
+.llm-call-block {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--p-surface-border);
+}
+
+.llm-call-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--p-surface-ground);
+  border-bottom: 1px solid var(--p-surface-border);
+
+  &.border-green { border-left: 3px solid #16a34a; }
+  &.border-yellow { border-left: 3px solid #ca8a04; }
+  &.border-red { border-left: 3px solid #ef4444; }
+}
+
+.llm-call-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--p-text-color);
+}
+
+.llm-call-spinner {
+  font-size: 0.7rem;
+  color: var(--p-primary-500);
+  margin-left: auto;
+}
+
+.ctx-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+
+  &.ctx-green { color: #16a34a; background: color-mix(in srgb, #16a34a 12%, transparent); }
+  &.ctx-yellow { color: #ca8a04; background: color-mix(in srgb, #ca8a04 12%, transparent); }
+  &.ctx-red { color: #ef4444; background: color-mix(in srgb, #ef4444 12%, transparent); }
+}
+
+.llm-raw {
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  background: #1e1e2e;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.65rem;
+  line-height: 1.5;
+  color: #cdd6f4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.llm-input-section {
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.llm-input-toggle {
   display: flex;
   align-items: center;
   gap: 0.375rem;
+  width: 100%;
+  background: #1a1a2e;
+  border: none;
   padding: 0.375rem 0.75rem;
-  border-radius: 8px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  border: 1px solid var(--p-surface-border);
-  transition: all 0.3s;
-
-  &.chip-pending {
-    background: var(--p-surface-ground);
-    color: var(--p-text-color-secondary);
-  }
-
-  &.chip-green {
-    background: color-mix(in srgb, #16a34a 12%, transparent);
-    border-color: color-mix(in srgb, #16a34a 30%, transparent);
-    color: #16a34a;
-  }
-
-  &.chip-yellow {
-    background: color-mix(in srgb, #ca8a04 12%, transparent);
-    border-color: color-mix(in srgb, #ca8a04 30%, transparent);
-    color: #ca8a04;
-  }
-
-  &.chip-red {
-    background: color-mix(in srgb, #ef4444 12%, transparent);
-    border-color: color-mix(in srgb, #ef4444 30%, transparent);
-    color: #ef4444;
-  }
-}
-
-.chip-label {
-  white-space: nowrap;
-}
-
-.chip-context {
-  text-transform: uppercase;
+  cursor: pointer;
   font-size: 0.65rem;
-  letter-spacing: 0.5px;
+  font-weight: 600;
+  color: #89b4fa;
+  transition: background 0.15s;
+
+  &:hover { background: #232338; }
+
+  > i { font-size: 0.5rem; }
 }
 
-.chip-icon {
-  font-size: 0.7rem;
+.llm-input-raw {
+  background: #181825;
+  color: #a6adc8;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  max-height: 300px;
 }
 
 // ── Top-Holdings context ──
@@ -1169,6 +1323,7 @@ onMounted(async () => {
   &.sma-above { color: #10b981; background: rgba(16, 185, 129, 0.08); }
   &.sma-below { color: #ef4444; background: rgba(239, 68, 68, 0.08); }
 }
+
 
 // ── Status messages ──
 .status-msg {

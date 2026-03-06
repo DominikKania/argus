@@ -145,9 +145,12 @@ def build_market_context(market: dict) -> list[str]:
     pc = market.get("put_call")
     if pc:
         lines.append("")
-        lines.append("## PUT/CALL RATIO (SPY, nächster Verfall)")
-        lines.append(f"- Put OI: {pc['put_oi']:,} | Call OI: {pc['call_oi']:,}")
-        lines.append(f"- Ratio: {pc['ratio']:.2f} ({pc['signal']})")
+        lines.append("## PUT/CALL RATIO (SPY+QQQ+IWM, nächste Verfalltermine aggregiert)")
+        lines.append(f"- Gesamt Put OI: {pc['put_oi']:,} | Call OI: {pc['call_oi']:,}")
+        lines.append(f"- Gesamt-Ratio: {pc['ratio']:.2f} ({pc['signal']})")
+        if pc.get("details"):
+            for ticker, d in pc["details"].items():
+                lines.append(f"  - {ticker}: Ratio {d['ratio']:.2f} ({d['terms']} Verfalltermine)")
 
     # EUR/USD
     eur = market.get("eurusd")
@@ -400,6 +403,98 @@ def build_semantic_lessons_context(market_summary: str, max_lessons: int = 3) ->
         return []
 
 
+def build_sector_analysis_context(market: dict) -> list[str]:
+    """Build a dynamic sector analysis derived from actual holdings data.
+
+    Computes sector-level aggregates (weight, SMA50 health, performance)
+    from the top holdings — works for any ticker, not hardcoded to IWDA.
+    """
+    th = market.get("top_holdings")
+    if not th or not th.get("holdings"):
+        return []
+
+    holdings = th["holdings"]
+    sr = market.get("sector_rotation", {})
+    sectors_perf = {}
+    if isinstance(sr, dict) and sr.get("sectors"):
+        sectors_perf = {name: data.get("perf_1m", 0) for name, data in sr["sectors"].items()}
+
+    # Aggregate by sector
+    sector_data = {}
+    for h in holdings:
+        sector = h.get("sector", "Other")
+        if sector not in sector_data:
+            sector_data[sector] = {
+                "weight": 0, "count": 0, "above_sma50": 0,
+                "total_puffer": 0, "total_perf": 0, "tickers": [],
+            }
+        sd = sector_data[sector]
+        sd["weight"] += h.get("weight_pct", 0)
+        sd["count"] += 1
+        if h.get("above_sma50"):
+            sd["above_sma50"] += 1
+        sd["total_puffer"] += h.get("puffer_sma50_pct", 0)
+        sd["total_perf"] += h.get("perf_1m_pct", 0)
+        sd["tickers"].append(h.get("ticker", "?"))
+
+    if not sector_data:
+        return []
+
+    # Sort by weight
+    sorted_sectors = sorted(sector_data.items(), key=lambda x: x[1]["weight"], reverse=True)
+
+    total_weight = sum(sd["weight"] for _, sd in sorted_sectors)
+    weight_under_pressure = sum(
+        sd["weight"] for _, sd in sorted_sectors
+        if sd["above_sma50"] < sd["count"] / 2
+    )
+
+    lines = [
+        "",
+        "## SEKTOR-ANALYSE (dynamisch aus Holdings berechnet)",
+        "Zeigt welche Sektoren das Portfolio treiben oder belasten.",
+        "",
+    ]
+
+    for sector, sd in sorted_sectors:
+        avg_puffer = sd["total_puffer"] / sd["count"] if sd["count"] else 0
+        avg_perf = sd["total_perf"] / sd["count"] if sd["count"] else 0
+        sma_health = "{}/{}".format(sd["above_sma50"], sd["count"])
+
+        # Health indicator
+        if sd["above_sma50"] == sd["count"]:
+            health = "STARK"
+        elif sd["above_sma50"] >= sd["count"] / 2:
+            health = "GEMISCHT"
+        else:
+            health = "SCHWACH"
+
+        # Sector ETF performance if available
+        sector_key = sector.lower().replace(" ", "_")
+        etf_perf = sectors_perf.get(sector_key)
+        etf_str = " | Sektor-ETF 1M: {:+.1f}%".format(etf_perf) if etf_perf is not None else ""
+
+        lines.append(
+            "- **{sector}** ({weight:.1f}% Gewicht): {health} | "
+            "{sma_health} über SMA50 | Ø Puffer: {puffer:+.1f}% | "
+            "Ø 1M: {perf:+.1f}%{etf} | [{tickers}]".format(
+                sector=sector, weight=sd["weight"], health=health,
+                sma_health=sma_health, puffer=avg_puffer, perf=avg_perf,
+                etf=etf_str, tickers=", ".join(sd["tickers"]),
+            )
+        )
+
+    # Summary
+    lines.append("")
+    if total_weight > 0:
+        pct_pressure = (weight_under_pressure / total_weight) * 100
+        lines.append("Zusammenfassung: {:.0f}% des Portfoliogewichts (der Top-Holdings) "
+                      "liegt in Sektoren mit mehrheitlich schwacher technischer Lage "
+                      "(unter SMA50).".format(pct_pressure))
+
+    return lines
+
+
 def build_positions_context(positions: list) -> list[str]:
     """Build open positions context for the synthesis prompt."""
     if not positions:
@@ -559,16 +654,55 @@ def build_volatility_analyst_prompt(market: dict, mech_signals: dict, researches
     lines = [
         f"Bewerte das Volatilitäts-Signal für {datetime.now().strftime('%Y-%m-%d')}.",
         "",
-        "## MARKTDATEN",
-        f"- VIX: {vix['value']} (Vorwoche: {vix['prev_week']}, Richtung: {vix['direction']})",
-        "",
-        "## MECHANISCHES SIGNAL",
-        f"- Volatilität: {mech_signals['volatility']} (VIX {vix['value']})",
+        "## VIX (Angst-Index)",
+        f"- Aktuell: {vix['value']}",
+        f"- Vorwoche: {vix['prev_week']}",
+        f"- Richtung: {vix['direction']}",
     ]
 
+    # Put/Call Ratio
     pc = market.get("put_call")
     if pc:
-        lines.append(f"- Put/Call Ratio: {pc['ratio']:.2f} ({pc['signal']})")
+        lines.append("")
+        lines.append("## PUT/CALL RATIO (Absicherungsstimmung)")
+        lines.append(f"- Gesamt-Ratio: {pc['ratio']:.2f} ({pc['signal']})")
+        lines.append(f"- Put OI: {pc['put_oi']:,} | Call OI: {pc['call_oi']:,}")
+        if pc.get("details"):
+            for ticker, d in pc["details"].items():
+                lines.append(f"  - {ticker}: Ratio {d['ratio']:.2f} ({d['terms']} Verfalltermine)")
+
+    # Technische Levels (Drawdown-Kontext)
+    lines.append("")
+    lines.append("## TECHNISCHE LEVELS")
+    if market.get("price"):
+        lines.append(f"- Kurs: {market['price']}")
+    if market.get("sma50"):
+        lines.append(f"- SMA50: {market['sma50']}")
+    if market.get("puffer_sma50_pct") is not None:
+        lines.append(f"- Abstand zu SMA50: {market['puffer_sma50_pct']:+.1f}%")
+    if market.get("sma200"):
+        lines.append(f"- SMA200: {market['sma200']}")
+    if market.get("ath") and market.get("delta_ath_pct") is not None:
+        lines.append(f"- ATH: {market['ath']} (Abstand: {market['delta_ath_pct']:+.1f}%)")
+
+    # Credit Spread (Stress-Indikator)
+    cs = market.get("credit_spread")
+    if cs:
+        lines.append("")
+        lines.append("## CREDIT SPREAD (Stress-Indikator)")
+        lines.append(f"- Spread-Proxy (HYG vs LQD): {cs['spread_proxy']:+.2f}pp ({cs['direction']})")
+
+    # Sektor-Rotation (Risk-On/Off)
+    sr = market.get("sector_rotation")
+    if sr and sr.get("risk_on_vs_off") is not None:
+        lines.append("")
+        lines.append("## RISIKOAPPETIT")
+        lines.append(f"- Risk-On vs Risk-Off: {sr['risk_on_vs_off']:+.2f}pp")
+
+    # Mechanisches Signal
+    lines.append("")
+    lines.append("## MECHANISCHES SIGNAL")
+    lines.append(f"- Volatilität: {mech_signals['volatility']} (VIX {vix['value']})")
 
     targeted = _filter_researches_for(researches or [], "volatility")
     lines.extend(build_research_context(targeted))
@@ -661,7 +795,7 @@ def build_sentiment_analyst_prompt(
     # Put/Call
     pc = market.get("put_call")
     if pc:
-        lines.append(f"- Put/Call Ratio: {pc['ratio']:.2f} ({pc['signal']})")
+        lines.append(f"- Put/Call Ratio (aggregiert): {pc['ratio']:.2f} ({pc['signal']})")
 
     # Earnings (upcoming + recently reported for event risk)
     lines.extend(build_earnings_context(market))
@@ -750,6 +884,9 @@ def build_synthesis_prompt(
             worst = sorted(weak, key=lambda h: h.get("puffer_sma50_pct") or 0)[:3]
             parts = [f"{h['ticker']} ({h.get('puffer_sma50_pct', 0):+.1f}%)" for h in worst]
             lines.append(f"  Schwächste: {', '.join(parts)}")
+
+    # Sector analysis (dynamic from holdings)
+    lines.extend(build_sector_analysis_context(market))
 
     # Research, News, History, Theses, Positions
     lines.extend(build_research_context(researches or []))

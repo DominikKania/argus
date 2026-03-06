@@ -87,8 +87,7 @@ function askAbout() {
     return `${h.name} (${h.ticker}): $${h.price}, 1M: ${formatSigned(h.perf_1m_pct)}%, ${sma} SMA50`
   })
   chatStore.openWithContext(
-    `Top-Holdings Analyse:\n${props.holdings.above_sma50_count}/${props.holdings.total_count} über SMA50\n\n${lines.join('\n')}`,
-    'Was sagen die Top-Holdings über den Zustand meines ETF?',
+    `Top-Holdings Analyse:\n${props.holdings.above_sma50_count}/${props.holdings.total_count} über SMA50\n\n${lines.join('\n')}\n\nWas sagen die Top-Holdings über den Zustand meines ETF?`
   )
 }
 </script>

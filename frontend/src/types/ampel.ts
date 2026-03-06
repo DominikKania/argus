@@ -93,6 +93,26 @@ export interface EarningsData {
   tickers_loaded: number
 }
 
+export interface TopHolding {
+  ticker: string
+  name: string
+  sector: string
+  weight_pct: number
+  price: number
+  sma50: number | null
+  above_sma50: boolean | null
+  puffer_sma50_pct: number | null
+  perf_1m_pct: number
+}
+
+export interface TopHoldings {
+  total_count: number
+  above_sma50_count: number
+  above_sma50_pct: number
+  avg_puffer_pct: number
+  holdings: TopHolding[]
+}
+
 export interface MarketData {
   price: number
   sma50: number
@@ -110,6 +130,10 @@ export interface MarketData {
   eurusd?: EurUsd | null
   credit_spread?: CreditSpread | null
   earnings?: EarningsData | null
+  top_holdings?: TopHoldings | null
+  oil?: Record<string, unknown> | null
+  gold?: Record<string, unknown> | null
+  dxy?: Record<string, unknown> | null
 }
 
 export type SignalColor = 'green' | 'yellow' | 'red'

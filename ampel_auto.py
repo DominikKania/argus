@@ -109,25 +109,32 @@ Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
 """
 
 VOLATILITY_ANALYST_PROMPT = """\
-Du bist der Volatilit\u00e4ts-Analyst des Argus Investment-Systems.
-
-## PORTFOLIO
-iShares Core MSCI World UCITS ETF USD (Acc) — ~6.700\u20ac, 100% Allokation
+Du bist der Volatilitäts-Analyst des Argus Investment-Systems.
 
 ## DEINE AUFGABE
-Bewerte den Kontext-Layer des Volatilit\u00e4ts-Signals.
+Bewerte den Kontext-Layer des Volatilitäts-Signals anhand ALLER bereitgestellten Daten.
+
+## DATENBASIS (was du erhältst)
+- VIX: Angst-Index (aktuell, Vorwoche, Richtung)
+- Put/Call Ratio: Absicherungsstimmung am Optionsmarkt (SPY+QQQ+IWM aggregiert)
+  - >1.5 = hohe Angst/Absicherung, <0.8 = hohe Sorglosigkeit
+  - Aufschlüsselung nach ETF zeigt wo die Angst sitzt (Tech vs Small Caps)
+- Technische Levels: Kurs vs SMA50/SMA200, ATH-Abstand
+- Credit Spread: Stress-Indikator (Widening = Risikoaversion)
+- Risikoappetit: Risk-On vs Risk-Off Sektoren
 
 ## REGELN
 - VIX <13 allein ist KEIN automatisches Rot
-- Pr\u00fcfe ob VIX f\u00fcr "underpriced" gehalten wird (versteckte Risiken bei niedrigem VIX)
-- VIX-Richtung beachten: steigend von niedrigem Niveau = fr\u00fche Warnung
-- Put/Call Ratio als Kontr\u00e4r-Indikator: >1.2 = hohe Angst, <0.7 = hohe Gier
+- Prüfe ob VIX für "underpriced" gehalten wird (versteckte Risiken bei niedrigem VIX)
+- VIX-Richtung beachten: steigend von niedrigem Niveau = frühe Warnung
+- Mehrere Warnsignale gleichzeitig (VIX steigend + PCR hoch + Credit Spread widening) = stärker gewichten
+- Widersprüche beachten: z.B. VIX niedrig aber PCR hoch = mögliche Fehlbewertung
 
 ## AUSGABE
 Antworte AUSSCHLIESSLICH mit JSON. Kein Text davor oder danach.
 {
   "context": "green|yellow|red",
-  "note": "1-2 S\u00e4tze in einfachem Deutsch, keine Fachk\u00fcrzel"
+  "note": "1-2 Sätze in einfachem Deutsch, keine Fachkürzel"
 }
 """
 
@@ -397,6 +404,7 @@ def call_signal_analyst(signal_name, system_prompt, user_prompt, max_retries=1):
         try:
             llm_text = call_llm(system_prompt, user_prompt)
             result = extract_json(llm_text)
+            result["_raw_text"] = llm_text
             log.info("Stage 1 %s: context=%s", signal_name, result.get("context"))
             return result
         except Exception as e:

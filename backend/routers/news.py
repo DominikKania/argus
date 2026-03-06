@@ -113,6 +113,11 @@ class UpdateNewsTopicRequest(BaseModel):
     rss_feeds: Optional[list[dict]] = None
 
 
+class SuggestFeedsRequest(BaseModel):
+    title: str
+    prompt: Optional[str] = None
+
+
 class GeneratePromptRequest(BaseModel):
     title: str
     direction: Optional[str] = None
@@ -207,6 +212,54 @@ def create_topic(req: CreateNewsTopicRequest):
     return doc
 
 
+SUGGEST_FEEDS_SYSTEM = """\
+Du bist ein RSS-Feed-Experte. Der Benutzer hat ein News-Thema für sein Investment-Monitoring-System. \
+Finde die besten RSS-Feeds um dieses Thema abzudecken.
+
+## REGELN
+- Schlage 5-10 RSS-Feeds vor die das Thema gut abdecken
+- Mische deutsch- und englischsprachige Feeds
+- Bevorzuge etablierte, zuverlässige Quellen (Reuters, Bloomberg, Tagesschau, Handelsblatt, BBC, etc.)
+- Wähle Feeds die thematisch zum Topic passen (Politik-Thema → Politik-Feeds, nicht nur Finanz-Feeds)
+- Gib NUR valide RSS/Atom-Feed-URLs an (keine normalen Webseiten)
+- Antworte AUSSCHLIESSLICH mit einem JSON-Array:
+[{"name": "Feed-Name", "url": "https://..."}, ...]
+- Keine Erklärung, kein Markdown — nur das JSON-Array\
+"""
+
+
+@router.post("/suggest-feeds")
+def suggest_feeds(req: SuggestFeedsRequest):
+    """Use LLM to suggest optimal RSS feeds for a news topic."""
+    try:
+        user_msg = f"Finde die besten RSS-Feeds für das News-Thema: {req.title}"
+        if req.prompt:
+            user_msg += f"\n\nAnalyse-Fokus:\n{req.prompt}"
+
+        import json as _json
+        raw = call_llm(
+            SUGGEST_FEEDS_SYSTEM,
+            [{"role": "user", "content": user_msg}],
+            max_tokens=1024,
+        )
+        # Extract JSON array from response
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        feeds = _json.loads(raw)
+        if not isinstance(feeds, list):
+            raise ValueError("Expected JSON array")
+        # Validate structure
+        validated = []
+        for f in feeds:
+            if isinstance(f, dict) and f.get("name") and f.get("url"):
+                validated.append({"name": f["name"], "url": f["url"]})
+        return {"feeds": validated}
+    except Exception as e:
+        log.error("Feed-Vorschläge fehlgeschlagen: %s", e)
+        raise HTTPException(status_code=500, detail="Feed-Vorschläge konnten nicht generiert werden.")
+
+
 @router.post("/generate-prompt")
 def generate_prompt(req: GeneratePromptRequest):
     """Generate a news prompt without saving (for preview)."""
@@ -263,7 +316,8 @@ def update_topic(id_or_slug: str, req: UpdateNewsTopicRequest):
     if req.active is not None:
         update["active"] = req.active
     if req.rss_feeds is not None:
-        update["rss_feeds"] = req.rss_feeds
+        # Empty list = reset to default feeds
+        update["rss_feeds"] = req.rss_feeds if req.rss_feeds else None
 
     db.news_topics.update_one({"_id": doc["_id"]}, {"$set": update})
 

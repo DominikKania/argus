@@ -342,32 +342,59 @@ def fetch_seasonality():
         return None
 
 
+def _fetch_pcr_for_ticker(ticker, max_terms=3):
+    """Holt Put/Call OI für einen einzelnen Ticker (nächste max_terms Verfalltermine)."""
+    t = yf.Ticker(ticker)
+    dates = t.options
+    if not dates:
+        return None
+
+    t_calls = 0
+    t_puts = 0
+    terms = 0
+    for d in dates[:max_terms]:
+        chain = t.option_chain(d)
+        if chain is None:
+            continue
+        t_calls += int(chain.calls["openInterest"].sum())
+        t_puts += int(chain.puts["openInterest"].sum())
+        terms += 1
+
+    if t_calls == 0:
+        return None
+    return {"call_oi": t_calls, "put_oi": t_puts, "terms": terms}
+
+
 def fetch_put_call_ratio():
-    """Berechnet Put/Call Ratio aus SPY Options Open Interest.
+    """Berechnet Put/Call Ratio aus SPY+QQQ+IWM Options Open Interest.
+
+    Aggregiert über die nächsten 3 Verfalltermine pro ETF für ein
+    robustes Signal. Einzelne Verfalltermine sind zu verrauscht.
+
+    SPY (S&P 500), QQQ (Nasdaq 100) und IWM (Russell 2000) als breiter
+    Markt-Sentiment-Indikator für Risiko- und Absicherungsstimmung.
 
     Returns:
-        dict mit put_oi, call_oi, ratio, signal — oder None bei Fehler.
+        dict mit put_oi, call_oi, ratio, signal, details — oder None bei Fehler.
     """
     try:
-        spy = yf.Ticker(SPY_TICKER)
-        dates = spy.options
-        if not dates:
-            log.warning("Put/Call: keine SPY-Optionstermine")
-            return None
+        total_call_oi = 0
+        total_put_oi = 0
+        details = {}
 
-        chain = spy.option_chain(dates[0])
-        if chain is None:
-            return None
-
-        calls_df = chain.calls
-        puts_df = chain.puts
-
-        if calls_df.empty or puts_df.empty:
-            log.warning("Put/Call: leere Options-Chain")
-            return None
-
-        total_call_oi = int(calls_df["openInterest"].sum())
-        total_put_oi = int(puts_df["openInterest"].sum())
+        # Sequentiell pro ETF (vermeidet Deadlock bei verschachtelten ThreadPools)
+        for ticker in ["SPY", "QQQ", "IWM"]:
+            try:
+                result = _fetch_pcr_for_ticker(ticker)
+                if result:
+                    details[ticker] = {
+                        **result,
+                        "ratio": round(result["put_oi"] / result["call_oi"], 2),
+                    }
+                    total_call_oi += result["call_oi"]
+                    total_put_oi += result["put_oi"]
+            except Exception as e:
+                log.warning("Put/Call %s fehlgeschlagen: %s", ticker, e)
 
         if total_call_oi == 0:
             log.warning("Put/Call: Call OI ist 0")
@@ -375,19 +402,24 @@ def fetch_put_call_ratio():
 
         ratio = round(total_put_oi / total_call_oi, 2)
 
-        if ratio > 1.2:
+        # Schwellenwerte für aggregierte PCR (breiter Markt)
+        if ratio > 1.5:
             signal = "bearish"
-        elif ratio < 0.7:
+        elif ratio < 0.8:
             signal = "bullish"
         else:
             signal = "neutral"
 
-        log.info("Put/Call: Puts %d, Calls %d, Ratio %.2f (%s)", total_put_oi, total_call_oi, ratio, signal)
+        log.info(
+            "Put/Call (SPY+QQQ+IWM): Puts %d, Calls %d, Ratio %.2f (%s)",
+            total_put_oi, total_call_oi, ratio, signal,
+        )
         return {
             "put_oi": total_put_oi,
             "call_oi": total_call_oi,
             "ratio": ratio,
             "signal": signal,
+            "details": details,
         }
     except Exception as e:
         log.warning("Put/Call Ratio fehlgeschlagen: %s", e)

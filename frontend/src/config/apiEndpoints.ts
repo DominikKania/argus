@@ -46,5 +46,6 @@ export const API_ENDPOINTS = {
     LATEST: '/news/latest',
     GENERATE_PROMPT: '/news/generate-prompt',
     REFINE_PROMPT: '/news/refine-prompt',
+    SUGGEST_FEEDS: '/news/suggest-feeds',
   },
 } as const

@@ -275,15 +275,135 @@ def run_ampel_analysis():
             mech_signals, mech_score = calculate_mechanical_signals(market)
             yield _sse_event("status", f"Marktdaten geladen. Score: {mech_score}/4")
 
-            # 3. News
-            active_news = db.news_topics.count_documents({"active": True})
-            if active_news > 0:
-                yield _sse_event("status", f"Sammle News f\u00fcr {active_news} Topics...")
+            # 3. News (transparent pipeline — every step streamed)
+            news_topics = list(db.news_topics.find({"active": True}))
+            if news_topics:
+                yield _sse_event("status", f"News: {len(news_topics)} aktive Topics gefunden")
                 try:
-                    from news import run_all_news_topics
-                    news_count = run_all_news_topics(db)
-                    yield _sse_event("status", f"{news_count or 0} News-Topics aktualisiert.")
+                    from news import (
+                        fetch_rss_headlines, analyze_news_topic,
+                        deep_research_news_topic,
+                    )
+
+                    # 3a. RSS Headlines holen (einmal für alle Topics)
+                    yield _sse_event("news_step", {
+                        "step": "rss_fetch",
+                        "status": "running",
+                        "detail": "Hole RSS-Headlines aus 10 Feeds...",
+                    })
+                    headlines = fetch_rss_headlines()
+                    yield _sse_event("news_step", {
+                        "step": "rss_fetch",
+                        "status": "done",
+                        "detail": f"{len(headlines)} Headlines aus RSS-Feeds geladen",
+                    })
+
+                    # 3b. Pro Topic: Headline-Analyse + Deep-Research
+                    news_count = 0
+                    for topic_doc in news_topics:
+                        topic_slug = topic_doc["topic"]
+                        topic_title = topic_doc.get("title", topic_slug)
+
+                        # Marktkontext
+                        last_analysis = db.analyses.find_one(sort=[("date", -1)])
+                        market_ctx = None
+                        if last_analysis:
+                            market_ctx = (
+                                f"Letzte Analyse ({last_analysis['date']}): "
+                                f"{last_analysis['rating']['overall']} "
+                                f"(Score {last_analysis['rating']['mechanical_score']}/4) — "
+                                f"{last_analysis['recommendation']['action']}"
+                            )
+
+                        # Bisherige Ergebnisse
+                        previous_results = list(
+                            db.news_results.find(
+                                {"topic": topic_slug, "date": {"$ne": date_str}},
+                                {"raw_headlines": 0},
+                            ).sort("date", -1).limit(5)
+                        )
+
+                        # Step: Headline-Analyse (LLM Call)
+                        yield _sse_event("news_step", {
+                            "step": "headline_analysis",
+                            "topic": topic_slug,
+                            "title": topic_title,
+                            "status": "running",
+                            "detail": f"LLM analysiert {len(headlines)} Headlines für '{topic_title}'...",
+                        })
+                        result = analyze_news_topic(
+                            topic_doc, headlines, market_ctx, previous_results,
+                        )
+                        headline_raw = result.pop("_raw_text", None)
+                        yield _sse_event("news_step", {
+                            "step": "headline_analysis",
+                            "topic": topic_slug,
+                            "title": topic_title,
+                            "status": "done",
+                            "detail": f"Trend: {result.get('trend', '?')}, "
+                                      f"{len(result.get('relevant_headlines', []))} relevante Headlines",
+                            "llm_raw": headline_raw,
+                            "result": {
+                                "trend": result.get("trend"),
+                                "summary": result.get("summary"),
+                                "development": result.get("development"),
+                                "relevant_count": len(result.get("relevant_headlines", [])),
+                                "sentiment_count": result.get("sentiment_count", {}),
+                                "triggers_detected": result.get("triggers_detected", []),
+                                "ampel_relevance": result.get("ampel_relevance", ""),
+                            },
+                        })
+
+                        # Step: Deep Research (LLM Call mit Web-Suche)
+                        yield _sse_event("news_step", {
+                            "step": "deep_research",
+                            "topic": topic_slug,
+                            "title": topic_title,
+                            "status": "running",
+                            "detail": f"Deep-Research mit Web-Suche für '{topic_title}'...",
+                        })
+                        deep_research = deep_research_news_topic(
+                            topic_doc, result, market_ctx, previous_results,
+                        )
+                        dr_len = len(deep_research) if deep_research else 0
+                        yield _sse_event("news_step", {
+                            "step": "deep_research",
+                            "topic": topic_slug,
+                            "title": topic_title,
+                            "status": "done",
+                            "detail": f"Deep-Research: {dr_len} Zeichen" if dr_len else "Keine Deep-Research",
+                            "llm_raw": deep_research,
+                        })
+
+                        # Speichern
+                        from datetime import datetime as _dt
+                        doc = {
+                            "topic": topic_slug,
+                            "date": date_str,
+                            "headlines_fetched": len(headlines),
+                            "relevant_headlines": result.get("relevant_headlines", []),
+                            "sentiment_count": result.get("sentiment_count", {}),
+                            "summary": result.get("summary", ""),
+                            "development": result.get("development", ""),
+                            "recurring": result.get("recurring", ""),
+                            "trend": result.get("trend", "stable"),
+                            "trend_reasoning": result.get("trend_reasoning", ""),
+                            "triggers_detected": result.get("triggers_detected", []),
+                            "ampel_relevance": result.get("ampel_relevance", ""),
+                            "deep_research": deep_research,
+                            "raw_headlines": headlines,
+                            "created_date": _dt.now().isoformat(),
+                        }
+                        db.news_results.update_one(
+                            {"topic": topic_slug, "date": date_str},
+                            {"$set": doc},
+                            upsert=True,
+                        )
+                        news_count += 1
+
+                    yield _sse_event("status", f"{news_count} News-Topics analysiert.")
                 except Exception as e:
+                    log.error("News-Pipeline fehlgeschlagen: %s", e, exc_info=True)
                     yield _sse_event("status", f"News-Sammlung fehlgeschlagen: {e}")
 
             # 4. Load context
@@ -299,9 +419,18 @@ def run_ampel_analysis():
 
             # 5. Stage 1: Signal-Analysten (4 parallel)
             yield _sse_event("status", "Stage 1: Bewerte Signale (4 Analysten parallel)...")
+
+            # Build input prompts for each stage (for transparency)
+            stage1_inputs = {
+                "trend": build_trend_analyst_prompt(market, mech_signals, researches),
+                "volatility": build_volatility_analyst_prompt(market, mech_signals, researches),
+                "macro": build_macro_analyst_prompt(market, mech_signals, researches),
+                "sentiment": build_sentiment_analyst_prompt(market, mech_signals, news_results, researches),
+            }
+
             stage1_results = run_stage1(market, mech_signals, news_results, researches)
 
-            # Emit signal results
+            # Emit signal results + raw Stage 1 LLM outputs + input data
             for name in ["trend", "volatility", "macro", "sentiment"]:
                 r = stage1_results.get(name)
                 if r:
@@ -310,6 +439,14 @@ def run_ampel_analysis():
                         "context": r.get("context"),
                         "note": r.get("note", ""),
                     })
+                    # Emit full Stage 1 LLM output for transparency
+                    raw_text = r.get("_raw_text")
+                    if raw_text:
+                        yield _sse_event("stage1_output", {
+                            "name": name,
+                            "text": raw_text,
+                            "input": stage1_inputs.get(name, ""),
+                        })
                 else:
                     yield _sse_event("signal", {
                         "name": name,
@@ -398,6 +535,7 @@ def run_ampel_analysis():
                 name: json.dumps(r, ensure_ascii=False) if r else None
                 for name, r in stage1_results.items()
             }
+            analysis["stage1_inputs"] = stage1_inputs
             yield _sse_event("status", "Speichere Analyse...")
             from argus import save_analysis
             save_analysis(db, analysis)
@@ -865,13 +1003,11 @@ def _build_knowledge_context(db, question: str) -> tuple[str, dict]:
                         h.get("price", 0), h.get("puffer_sma50_pct", 0),
                         h.get("perf_1m_pct", 0)))
 
-            # ── Sektorrotation ──
-            sr = m.get("sector_rotation", {})
-            if sr:
-                parts.append("\n## SEKTORROTATION")
-                for sector, perf in sorted(sr.items(), key=lambda x: x[1] if isinstance(x[1], (int, float)) else 0, reverse=True):
-                    if isinstance(perf, (int, float)):
-                        parts.append("  {}: {:+.2f}pp".format(sector, perf))
+            # ── Sektor-Analyse (dynamisch) ──
+            from backend.prompt_builder import build_sector_analysis_context
+            sector_lines = build_sector_analysis_context(m)
+            if sector_lines:
+                parts.extend(sector_lines)
 
         # ── Markt-Kontext Notizen ──
         mctx = analysis.get("market_context", {})

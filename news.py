@@ -14,18 +14,26 @@ log = logging.getLogger("ampel")
 # ── Default RSS-Feeds ────────────────────────────────────────────────────
 
 DEFAULT_RSS_FEEDS = [
-    # International — Englisch
+    # International — Finanzen
     {"name": "Bloomberg Markets", "url": "https://feeds.bloomberg.com/markets/news.rss"},
     {"name": "CNBC Markets", "url": "https://www.cnbc.com/id/20910258/device/rss/rss.html"},
     {"name": "FT Markets", "url": "https://www.ft.com/markets?format=rss"},
     {"name": "MarketWatch", "url": "https://feeds.marketwatch.com/marketwatch/marketpulse"},
     {"name": "BBC Business", "url": "https://feeds.bbci.co.uk/news/business/rss.xml"},
-    # Deutschland
+    # International — Politik & Welt
+    {"name": "Reuters World", "url": "https://www.reutersagency.com/feed/?best-topics=political-general"},
+    {"name": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml"},
+    # Deutschland — Finanzen
     {"name": "Handelsblatt", "url": "https://www.handelsblatt.com/contentexport/feed/finanzen"},
     {"name": "FAZ Finanzen", "url": "https://www.faz.net/rss/aktuell/finanzen/"},
+    # Deutschland — Wirtschaft & Politik
     {"name": "Tagesschau Wirtschaft", "url": "https://www.tagesschau.de/wirtschaft/index~rss2.xml"},
+    {"name": "Tagesschau Inland", "url": "https://www.tagesschau.de/inland/index~rss2.xml"},
+    {"name": "Tagesschau Ausland", "url": "https://www.tagesschau.de/ausland/index~rss2.xml"},
     {"name": "Spiegel Wirtschaft", "url": "https://www.spiegel.de/wirtschaft/index.rss"},
+    {"name": "Spiegel Politik", "url": "https://www.spiegel.de/politik/index.rss"},
     {"name": "NTV Wirtschaft", "url": "https://www.n-tv.de/wirtschaft/rss"},
+    {"name": "NTV Politik", "url": "https://www.n-tv.de/politik/rss"},
 ]
 
 # ── RSS-Fetching ─────────────────────────────────────────────────────────
@@ -398,7 +406,9 @@ def analyze_news_topic(topic_doc, headlines, market_context=None, previous_resul
     llm_text = call_llm(NEWS_ANALYSIS_SYSTEM, user_prompt, temperature=0)
 
     try:
-        return extract_json(llm_text)
+        result = extract_json(llm_text)
+        result["_raw_text"] = llm_text
+        return result
     except (json.JSONDecodeError, ValueError) as e:
         log.error("News-Analyse JSON-Parsing fehlgeschlagen für %s: %s", topic_doc["topic"], e)
         return {
@@ -496,7 +506,8 @@ def run_news_topic(db, topic_slug, headlines=None):
 def run_all_news_topics(db):
     """Führt die News-Analyse für alle aktiven Topics durch.
 
-    Headlines werden einmal geholt und für alle Topics wiederverwendet.
+    Default-Headlines werden einmal geholt und für Topics ohne eigene Feeds geteilt.
+    Topics mit eigenen Feeds holen ihre Headlines separat.
 
     Returns:
         Anzahl der erfolgreich analysierten Topics
@@ -506,13 +517,21 @@ def run_all_news_topics(db):
         log.info("Keine aktiven News-Topics")
         return 0
 
-    # Headlines einmal für alle Topics holen
-    headlines = fetch_rss_headlines()
-    log.info("%d Headlines für %d aktive Topics geholt", len(headlines), len(topics))
+    # Topics aufteilen: mit eigenen Feeds vs. Default-Feeds
+    default_topics = [t for t in topics if not t.get("rss_feeds")]
+    custom_topics = [t for t in topics if t.get("rss_feeds")]
+
+    # Default-Headlines einmal für alle Topics ohne eigene Feeds holen
+    default_headlines = None
+    if default_topics:
+        default_headlines = fetch_rss_headlines()
+        log.info("%d Default-Headlines für %d Topics geholt", len(default_headlines), len(default_topics))
 
     count = 0
     for topic in topics:
         try:
+            # Topics mit eigenen Feeds: headlines=None → run_news_topic holt sie selbst
+            headlines = default_headlines if not topic.get("rss_feeds") else None
             result = run_news_topic(db, topic["topic"], headlines=headlines)
             if result:
                 count += 1

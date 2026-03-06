@@ -191,7 +191,7 @@
         </div>
 
         <!-- Put/Call -->
-        <div v-if="market.put_call" class="ext-tile">
+        <div v-if="market.put_call?.ratio" class="ext-tile">
           <div class="ext-tile-header">
             <span class="ext-tile-label">Put/Call Ratio</span>
             <span class="ext-tile-value">
@@ -200,6 +200,18 @@
                 {{ market.put_call.signal }}
               </span>
             </span>
+          </div>
+          <div v-if="market.put_call.details" class="sector-details">
+            <div
+              v-for="(d, ticker) in market.put_call.details"
+              :key="ticker"
+              class="sector-item"
+            >
+              <span class="sector-name">{{ ticker }}</span>
+              <span class="sector-perf" :class="d.ratio > 1.5 ? 'perf-neg' : d.ratio < 0.8 ? 'perf-pos' : ''">
+                {{ d.ratio.toFixed(2) }}
+              </span>
+            </div>
           </div>
         </div>
 

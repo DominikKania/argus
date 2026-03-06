@@ -169,6 +169,22 @@ export const useNewsStore = defineStore('news', () => {
     }
   }
 
+  async function suggestFeeds(
+    title: string,
+    prompt?: string,
+  ): Promise<Array<{ name: string; url: string }> | null> {
+    try {
+      const res = await ApiService.post<{ feeds: Array<{ name: string; url: string }> }>(
+        API_ENDPOINTS.NEWS.SUGGEST_FEEDS,
+        { title, prompt: prompt || undefined },
+      )
+      return res.feeds
+    } catch (err) {
+      console.error(err)
+      return null
+    }
+  }
+
   return {
     topics,
     selectedTopic,
@@ -185,5 +201,6 @@ export const useNewsStore = defineStore('news', () => {
     deleteTopic,
     generatePrompt,
     refinePrompt,
+    suggestFeeds,
   }
 })

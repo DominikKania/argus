@@ -46,6 +46,9 @@
       <!-- Top Holdings -->
       <TopHoldingsCard v-if="analysis.market.top_holdings" :holdings="analysis.market.top_holdings" />
 
+      <!-- Sector Analysis -->
+      <SectorAnalysisCard v-if="analysis.market.top_holdings?.holdings?.length" :holdings="analysis.market.top_holdings" />
+
       <!-- Earnings -->
       <EarningsCard v-if="analysis.market.earnings" :earnings="analysis.market.earnings" />
 
@@ -76,6 +79,7 @@ import AmpelHeader from '@/components/features/ampel/AmpelHeader.vue'
 import SignalCard from '@/components/features/ampel/SignalCard.vue'
 import MarketDataCard from '@/components/features/ampel/MarketDataCard.vue'
 import TopHoldingsCard from '@/components/features/ampel/TopHoldingsCard.vue'
+import SectorAnalysisCard from '@/components/features/ampel/SectorAnalysisCard.vue'
 import EarningsCard from '@/components/features/ampel/EarningsCard.vue'
 import MarketContextCard from '@/components/features/ampel/MarketContextCard.vue'
 import SentimentEvents from '@/components/features/ampel/SentimentEvents.vue'
@@ -182,6 +186,7 @@ onMounted(() => {
 // Gap between cards
 .ampel-view > :deep(.market-data-card),
 .ampel-view > :deep(.top-holdings-card),
+.ampel-view > :deep(.sector-analysis-card),
 .ampel-view > :deep(.earnings-card),
 .ampel-view > :deep(.market-context-card),
 .ampel-view > :deep(.sentiment-events) {
